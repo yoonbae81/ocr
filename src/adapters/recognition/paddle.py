@@ -163,6 +163,4 @@ class PaddleAdapter:
                 raise RecognitionError(
                     detail="PaddleOCR-VL result conversion failed"
                 ) from error
-            if not markdown:
-                raise RecognitionError(detail="PaddleOCR-VL returned empty content")
             return markdown

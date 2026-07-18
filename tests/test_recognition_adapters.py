@@ -13,7 +13,6 @@ from adapters.recognition import recognizer_for
 from adapters.recognition.agy import AgyAdapter
 from adapters.recognition.codex import CodexAdapter
 from adapters.recognition.errors import (
-    RecognitionError,
     UnsupportedEffortError,
     UnsupportedModelError,
 )
@@ -173,17 +172,18 @@ def test_paddle_adapter_when_recognizing_uses_pipeline_and_returns_markdown(
     }
 
 
-def test_paddle_adapter_when_result_has_no_markdown_raises_recognition_error(
+def test_paddle_adapter_when_result_is_blank_returns_empty_content(
     page: ImagePage,
 ) -> None:
-    # Given: PaddleOCR-VL returns a malformed result.
+    # Given: PaddleOCR-VL returns a result for an intentionally blank page.
     pipeline = FakePaddlePipeline(markdown="")
-    pipeline.result.markdown = {}
     adapter = PaddleAdapter(endpoint="endpoint", model="model", pipeline=pipeline)
 
-    # When: PaddleOCR-VL returns no textual content for the page.
-    with pytest.raises(RecognitionError, match="empty content"):
-        _ = adapter.recognize(page, "prompt")
+    # When: the page is recognized.
+    result = adapter.recognize(page, "prompt")
+
+    # Then: the empty page is preserved as completed content, not a failure.
+    assert result == ""
 
 
 @pytest.mark.parametrize("model", ["gemini", "paddle"])
