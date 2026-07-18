@@ -130,6 +130,11 @@ uv run --project ../.. ocr scan.png 1 --model gemini --group page
 페이지 번호는 입력 파일의 물리적 페이지가 아니라 책에 인쇄된 페이지 번호로 씁니다.
 둘의 차이는 `--toc-offset`으로 보정합니다.
 
+```bash
+# PDF 앞에 표지가 3페이지 있어 인쇄 1쪽이 입력 4쪽인 경우
+uv run --project ../.. ocr book.pdf 1-120 --group chapter --toc-offset 3
+```
+
 ```markdown
 # Table of Contents
 
@@ -147,10 +152,49 @@ uv run --project ../.. ocr scan.png 1 --model gemini --group page
 상위 파트가 없다면 `## Contents` 아래에 `### 장 제목 | page: N` 형식으로 작성할 수
 있습니다. 페이지 번호는 양의 정수이고 오름차순이어야 합니다.
 
-```bash
-# PDF 앞에 표지가 3페이지 있어 인쇄 1쪽이 입력 4쪽인 경우
-uv run --project ../.. ocr book.pdf 1-120 --group chapter --toc-offset 3
+
+### LLM으로 `toc.md` 만들기
+
+<details>
+<summary>LLM에 보낼 프롬프트 보기</summary>
+
+책의 차례 페이지만 별도 PDF로 발췌한 뒤, 이미지/PDF를 읽을 수 있는 LLM에 아래
+프롬프트와 함께 첨부하세요. 받은 Markdown을 `workspace/book/toc.md`로 저장하면 됩니다.
+
+```text
+첨부한 PDF는 차례 페이지만 담겨 있다.
+차례를 인식해 책의 상하위 구조를 그대로 반영한 `toc.md` 내용을 만들어줘.
+페이지는 차례에 인쇄된 번호를 사용하고, 보이지 않는 내용은 추측하지 말고
+Markdown만 반환해.
+
+# Table of Contents
+
+## <상위 항목 제목> | page: <상위 항목이 시작하는 인쇄 페이지 번호>
+
+### <그 아래 항목 제목> | page: <해당 항목이 시작하는 인쇄 페이지 번호>
+
+- page: <더 세부적인 항목의 인쇄 페이지 번호>
+  title: <더 세부적인 항목 제목>
+
+## <다음 상위 항목 제목> | page: <상위 항목이 시작하는 인쇄 페이지 번호>
+
+### <그 아래 항목 제목> | page: <해당 항목이 시작하는 인쇄 페이지 번호>
+
+- page: <더 세부적인 항목의 인쇄 페이지 번호>
+  title: <더 세부적인 항목 제목>
+
+상위 항목이 없는 경우에는 다음 형식을 사용해.
+
+## Contents
+
+### <항목 제목> | page: <해당 항목이 시작하는 인쇄 페이지 번호>
+
+- page: <더 세부적인 항목의 인쇄 페이지 번호>
+  title: <더 세부적인 항목 제목>
 ```
+
+</details>
+
 
 ## 추가 프롬프트
 
