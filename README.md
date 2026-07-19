@@ -21,7 +21,7 @@ cp .env.example .env
 mkdir -p workspace
 cp /path/to/book.pdf workspace/book.pdf
 cd workspace
-uv run --project .. ocr book.pdf 1-3 --model gpt
+uv run --project .. ocr book.pdf 1-3
 ```
 
 ## 지원 범위
@@ -29,9 +29,8 @@ uv run --project .. ocr book.pdf 1-3 --model gpt
 - 입력: `.pdf`, `.jpg`, `.jpeg`, `.png`, 이미지가 든 `.zip`
 - 페이지 선택: 양의 정수(`5`) 또는 오름차순 범위(`5-15`)
 - 출력: 원본 물리 페이지마다 Markdown 파일 하나
-- 인식 백엔드: `gpt`, `gemini`, `paddle`
+- 인식 백엔드: PaddleOCR-VL
 - 완료/실패 상태 저장과 실패 페이지만 재시도
-- 작업 디렉터리별 OCR 지침(`prompt.md`)
 
 단일 이미지는 논리적 1페이지만 지원합니다. ZIP 안의 이미지 파일은 파일명 끝의 숫자를
 페이지 번호로 사용합니다. 예를 들어 `page-001.png`은 1페이지입니다.
@@ -44,20 +43,15 @@ uv run --project .. ocr INPUT_FILE PAGE_OR_RANGE [OPTIONS]
 ```
 
 ```bash
-# 5페이지만 PaddleOCR-VL로 인식
-uv run --project .. ocr book.pdf 5 --model paddle
-
-# 5~15페이지를 GPT로 인식
-uv run --project .. ocr book.pdf 5-15 --model gpt --effort low
+# 5~15페이지를 PaddleOCR-VL로 인식
+uv run --project .. ocr book.pdf 5-15
 
 # 단일 이미지 입력
-uv run --project .. ocr scan.png 1 --model gemini
+uv run --project .. ocr scan.png 1
 ```
 
 | 옵션 | 설명 | 기본값 |
 | --- | --- | --- |
-| `--model` | `gpt`, `gemini`, `paddle` 중 인식 방식 | `DEFAULT_MODEL` |
-| `--effort` | 인식 노력 수준 | `low` |
 | `--retry-failed` | 기록된 실패 페이지만 다시 처리 | 꺼짐 |
 
 한 페이지 이상이 실패하면 실패 내용을 저장한 뒤 종료 코드 `1`로 끝납니다.
@@ -67,7 +61,6 @@ uv run --project .. ocr scan.png 1 --model gemini
 ```text
 workspace/
 ├─ book.pdf
-├─ prompt.md                         # 선택: OCR 전사 지시
 └─ book/
    ├─ 0001.md
    ├─ 0002.md
@@ -95,26 +88,15 @@ OCR합니다. 다른 입력 문서를 같은 작업 디렉터리에서 실행하
 
 ## 인식 방식과 설정
 
-`.env`에서 사용할 인식 방식을 설정합니다.
-
-| 방식 | 필요한 환경 | 필수 설정 | 비고 |
-| --- | --- | --- | --- |
-| `gpt` | 로그인된 `codex` CLI | `CODEX_MODEL` | `--effort` 사용 가능 |
-| `gemini` | 로그인된 `agy` CLI | `AGY_MODEL` | `--effort low`만 지원 |
-| `paddle` | 접근 가능한 PaddleOCR-VL 서비스 | `PADDLE_ENDPOINT`, `PADDLE_MODEL` | `--effort low`만 지원 |
+PaddleOCR-VL 서비스에 접근할 수 있어야 하며, `.env`에 엔드포인트와 모델을 설정합니다.
 
 ```dotenv
 PADDLE_ENDPOINT=http://localhost:8111/
 PADDLE_MODEL=matrixmaven/PaddleOCR-VL-1.6-MLX
-CODEX_MODEL=gpt-5.6-luna
-AGY_MODEL=gemini-3.5-flash
-DEFAULT_MODEL=gpt
 CONCURRENCY=1
 RECOGNITION_TIMEOUT=300
 ```
 
-`prompt.md`를 작업 디렉터리 또는 상위 작업 디렉터리에 두면 GPT와 Gemini의 추가 전사
-지시로 사용합니다. PaddleOCR-VL은 추가 프롬프트를 사용하지 않습니다.
 
 ## 마이그레이션
 

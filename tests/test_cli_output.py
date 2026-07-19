@@ -17,10 +17,8 @@ from settings import Settings
 class RecognizerFactory(Protocol):
     def __call__(
         self,
-        model: str,
         *,
         settings: Settings,
-        effort: str,
     ) -> RecognizerPort: ...
 
 
@@ -57,8 +55,8 @@ def _png_bytes() -> bytes:
 
 
 def _recognizer_factory(recognizer: RecognizerPort) -> RecognizerFactory:
-    def factory(model: str, *, settings: Settings, effort: str) -> RecognizerPort:
-        _ = (model, settings, effort)
+    def factory(*, settings: Settings) -> RecognizerPort:
+        _ = settings
         return recognizer
 
     return factory

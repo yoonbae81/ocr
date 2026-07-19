@@ -7,7 +7,6 @@ import typer
 
 from adapters.output.markdown import MarkdownOutput
 from adapters.recognition import recognizer_for
-from adapters.recognition.errors import UnsupportedEffortError, UnsupportedModelError
 from adapters.source.image import ImageSource
 from adapters.source.pdf import PdfSource
 from adapters.source.zip import ZipSource
@@ -16,13 +15,12 @@ from application.observability import get_logger
 from application.pages import acquire_pages
 from application.ports.recognizer import RecognizerPort
 from application.ports.source import PageSourcePort
-from application.prompt import DEFAULT_TRANSCRIPTION_PROMPT, workspace_prompt_path
 from application.status import pending_pages
 from application.transcribe import transcribe_pages
-from domain.content import PageContent, PageNumber, SourcePage
+from domain.content import PageContent, PageNumber
 from domain.document import Document
 from domain.status import PageFailure
-from settings import MissingModelConfigurationError, ModelName, Settings
+from settings import MissingPaddleConfigurationError, Settings
 
 app = typer.Typer()
 PAGE_RANGE_PARTS: Final = 2
@@ -50,11 +48,8 @@ def ocr(
         ),
     ],
     page_or_range: Annotated[str, typer.Argument()],
-    model: Annotated[
-        ModelName, typer.Option(default_factory=lambda: _settings().default_model)
-    ],
-    effort: Annotated[str, typer.Option()] = "low",
     retry_failed: Annotated[bool, typer.Option("--retry-failed")] = False,
+    retry_attempts: Annotated[int, typer.Option("--retry-attempts")] = 1,
 ) -> None:
     """Transcribe selected local PDF, image, or ZIP pages into canonical Markdown."""
     logger = get_logger()
@@ -70,30 +65,42 @@ def ocr(
         logger.info("ocr.skipped", reason="already_completed")
         return
     settings = _settings()
-    recognizer = _recognizer(model, effort)
-    prompt_path = workspace_prompt_path(Path.cwd())
-    prompt = (
-        prompt_path.read_text(encoding="utf-8")
-        if prompt_path is not None
-        else DEFAULT_TRANSCRIPTION_PROMPT
-    )
-    if model is ModelName.PADDLE:
-        if prompt_path is not None:
-            logger.warning("ocr.prompt_ignored", model=model.value)
-        prompt = ""
+    recognizer = _recognizer()
     logger.info(
         "ocr.started",
-        model=model.value,
+        model="paddle",
         page_count=len(pending),
         concurrency=settings.concurrency,
+        retry_attempts=retry_attempts,
     )
     acquired = acquire_pages(source, document, pending)
-    content, failures = _transcribe_acquired(
-        acquired, recognizer=recognizer, prompt=prompt, concurrency=settings.concurrency
+    status = previous_status
+
+    def _on_page_completed(outcome: PageContent | PageFailure) -> None:
+        nonlocal status
+        content_batch: tuple[PageContent, ...] = (
+            (outcome,) if isinstance(outcome, PageContent) else ()
+        )
+        failure_batch: tuple[PageFailure, ...] = (
+            (outcome,) if isinstance(outcome, PageFailure) else ()
+        )
+        status = merge_status(
+            status,
+            content_batch,
+            failure_batch,
+            document=document_id,
+        )
+        _ = output.write(content_batch, status, source_name=document.path.name)
+
+    content, failures = transcribe_pages(
+        acquired,
+        recognizer,
+        "",
+        settings.concurrency,
+        max_retries=retry_attempts,
+        on_page_completed=_on_page_completed,
     )
-    status = merge_status(
-        previous_status, tuple(content), tuple(failures), document=document_id
-    )
+    status = merge_status(status, tuple(content), tuple(failures), document=document_id)
     _ = output.write(tuple(content), status, source_name=document.path.name)
     logger.info(
         "ocr.batch_completed", completed_count=len(content), failure_count=len(failures)
@@ -153,23 +160,8 @@ def _validate_selection(document: Document, pages: tuple[PageNumber, ...]) -> No
             raise typer.BadParameter(message, param_hint="input_file")
 
 
-def _recognizer(model: ModelName, effort: str) -> RecognizerPort:
+def _recognizer() -> RecognizerPort:
     try:
-        return recognizer_for(model.value, settings=_settings(), effort=effort)
-    except MissingModelConfigurationError as error:
-        raise typer.BadParameter(str(error), param_hint="model") from None
-    except UnsupportedEffortError as error:
-        raise typer.BadParameter(str(error), param_hint="effort") from None
-    except UnsupportedModelError as error:
-        raise typer.BadParameter(str(error), param_hint="model") from None
-
-
-def _transcribe_acquired(
-    acquired: tuple[SourcePage, ...],
-    *,
-    recognizer: RecognizerPort,
-    prompt: str,
-    concurrency: int,
-) -> tuple[list[PageContent], list[PageFailure]]:
-    """Recognize already-acquired pages and retain page-level failures."""
-    return transcribe_pages(acquired, recognizer, prompt, concurrency)
+        return recognizer_for(settings=_settings())
+    except MissingPaddleConfigurationError as error:
+        raise typer.BadParameter(str(error)) from None

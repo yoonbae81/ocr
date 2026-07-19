@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from subprocess import CompletedProcess
 from typing import TYPE_CHECKING, final
 
 if TYPE_CHECKING:
@@ -10,15 +9,9 @@ if TYPE_CHECKING:
 import pytest
 
 from adapters.recognition import recognizer_for
-from adapters.recognition.agy import AgyAdapter
-from adapters.recognition.codex import CodexAdapter
-from adapters.recognition.errors import (
-    UnsupportedEffortError,
-    UnsupportedModelError,
-)
 from adapters.recognition.paddle import PaddleAdapter
 from domain.content import ImagePage, PageNumber, SourceKind
-from settings import ModelName, Settings
+from settings import Settings
 
 
 @pytest.fixture
@@ -26,9 +19,6 @@ def settings() -> Settings:
     return Settings(
         paddle_endpoint="http://paddle.test:8111/",
         paddle_model="paddle-model",
-        codex_model="codex-model",
-        agy_model="agy-model",
-        default_model=ModelName.GPT,
     )
 
 
@@ -40,60 +30,6 @@ def page() -> ImagePage:
         media_type="image/png",
         source=SourceKind.IMAGE,
     )
-
-
-def test_codex_adapter_when_recognizing_passes_image_model_effort_and_prompt(
-    monkeypatch: pytest.MonkeyPatch,
-    settings: Settings,
-    page: ImagePage,
-) -> None:
-    # Given: Codex returns Markdown through its local CLI.
-    commands: list[list[str]] = []
-    materialized_images: list[tuple[str, bytes]] = []
-
-    def run(command: list[str], **_kwargs: object) -> CompletedProcess[str]:
-        commands.append(list(command))
-        image_path = Path(command[command.index("-i") + 1])
-        materialized_images.append((image_path.suffix, image_path.read_bytes()))
-        return CompletedProcess(command, 0, stdout="# page", stderr="")
-
-    monkeypatch.setattr("adapters.recognition._cli.subprocess.run", run)
-    adapter = CodexAdapter(model=settings.codex_model, effort="high")
-
-    # When: a page is recognized with a caller-supplied prompt.
-    result = adapter.recognize(page, "transcribe exactly")
-
-    # Then: the command receives the configured model, effort, prompt, and PNG input.
-    assert result == "# page"
-    assert commands[0][:2] == ["codex", "exec"]
-    assert commands[0][commands[0].index("--model") + 1] == "codex-model"
-    assert 'model_reasoning_effort="high"' in commands[0]
-    assert commands[0][-1] == "transcribe exactly"
-    assert materialized_images == [(".png", b"png bytes")]
-
-
-def test_agy_adapter_when_recognizing_passes_image_model_and_prompt(
-    monkeypatch: pytest.MonkeyPatch,
-    settings: Settings,
-    page: ImagePage,
-) -> None:
-    # Given: Agy returns Markdown through its local CLI.
-    commands: list[list[str]] = []
-
-    def run(command: list[str], **_kwargs: object) -> CompletedProcess[str]:
-        commands.append(list(command))
-        return CompletedProcess(command, 0, stdout="# page", stderr="")
-
-    monkeypatch.setattr("adapters.recognition._cli.subprocess.run", run)
-    adapter = AgyAdapter(model=settings.agy_model)
-
-    # When: a page is recognized with a caller-supplied prompt.
-    result = adapter.recognize(page, "transcribe exactly")
-
-    # Then: Agy receives the configured model, image path, and prompt without effort.
-    assert result == "# page"
-    assert commands[0][:4] == ["agy", "--model", "agy-model", "--print"]
-    assert commands[0][-1].endswith("transcribe exactly")
 
 
 @final
@@ -186,18 +122,6 @@ def test_paddle_adapter_when_result_is_blank_returns_empty_content(
     assert result == ""
 
 
-@pytest.mark.parametrize("model", ["gemini", "paddle"])
-def test_recognizer_for_when_effort_is_nondefault_rejects_it(
-    settings: Settings,
-    model: str,
-) -> None:
-    # Given: a recognizer that does not expose reasoning-effort configuration.
-
-    # When / Then: the composition boundary rejects an ignored effort flag.
-    with pytest.raises(UnsupportedEffortError, match=model):
-        _ = recognizer_for(model, settings=settings, effort="high")
-
-
 def test_recognizer_for_when_model_is_paddle_uses_paddle_adapter(
     monkeypatch: pytest.MonkeyPatch,
     settings: Settings,
@@ -211,35 +135,9 @@ def test_recognizer_for_when_model_is_paddle_uses_paddle_adapter(
     monkeypatch.setattr("adapters.recognition.paddle._build_pipeline", build_pipeline)
 
     # When: the Paddle selector is assembled.
-    adapter = recognizer_for("paddle", settings=settings, effort="low")
+    adapter = recognizer_for(settings=settings)
 
     # Then: the Paddle adapter receives the configured endpoint and model.
     assert isinstance(adapter, PaddleAdapter)
     assert adapter.endpoint == settings.paddle_endpoint
     assert adapter.model == settings.paddle_model
-
-
-def test_recognizer_for_when_model_is_unknown_raises_unsupported_model_error(
-    settings: Settings,
-) -> None:
-    # Given: an unknown model selector.
-
-    # When / Then: composition rejects it before recognizing a page.
-    with pytest.raises(UnsupportedModelError, match="unknown"):
-        _ = recognizer_for("unknown", settings=settings, effort="low")
-
-
-@pytest.mark.parametrize("model", ["gpt", "gemini"])
-def test_recognizer_for_when_timeout_is_configured_passes_it_to_cli_adapter(
-    settings: Settings,
-    model: str,
-) -> None:
-    # Given: one shared recognition timeout configured at the composition boundary.
-    configured = settings.model_copy(update={"recognition_timeout": 17.0})
-
-    # When: a local CLI recognizer is assembled.
-    adapter = recognizer_for(model, settings=configured, effort="low")
-
-    # Then: both local adapters receive the same configured timeout.
-    assert isinstance(adapter, (CodexAdapter, AgyAdapter))
-    assert adapter.timeout == 17.0

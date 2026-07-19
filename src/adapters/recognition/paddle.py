@@ -14,9 +14,10 @@ from PIL import Image, UnidentifiedImageError
 from domain.content import ImagePage
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Generator, Sequence
 
-from ._cli import temporary_image
+from contextlib import contextmanager
+
 from .errors import RecognitionError
 
 PADDLE_MIN_PIXELS = 28 * 28 * 130
@@ -109,6 +110,23 @@ def _smart_resize(page: ImagePage) -> ImagePage:
     )
 
 
+@contextmanager
+def _temporary_image(page: ImagePage) -> Generator[Path, None, None]:  # noqa: UP043
+    match page.media_type:
+        case "image/jpeg":
+            suffix = ".jpg"
+        case "image/png":
+            suffix = ".png"
+        case unsupported:
+            raise RecognitionError(
+                detail=f"unsupported image media type: {unsupported}"
+            )
+    with TemporaryDirectory(prefix="paddle-image-") as directory:
+        path = Path(directory) / f"page-{page.page}{suffix}"
+        _ = path.write_bytes(page.image)
+        yield path
+
+
 @dataclass(slots=True)
 class PaddleAdapter:
     """Recognize page images through the configured PaddleOCR-VL service."""
@@ -128,7 +146,7 @@ class PaddleAdapter:
         if self.pipeline is None:
             raise RecognitionError(detail="PaddleOCR-VL pipeline is not initialized")
         resized_page = _smart_resize(page)
-        with temporary_image(resized_page) as image_path:
+        with _temporary_image(resized_page) as image_path:
             try:
                 results = self.pipeline.predict(
                     image_path.as_posix(),

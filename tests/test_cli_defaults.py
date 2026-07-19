@@ -6,7 +6,7 @@ from typer.testing import CliRunner
 from application.ports.recognizer import RecognizerPort
 from cli import app
 from domain.content import ImagePage
-from settings import ModelName, Settings
+from settings import Settings
 
 
 class SuccessfulRecognizer:
@@ -19,21 +19,18 @@ def test_cli_when_model_is_omitted_uses_configured_default(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Given: settings select Gemini and no model option is supplied.
+    # Given: PaddleOCR settings and no model option are supplied.
     image_path = tmp_path / "scan.png"
     _ = image_path.write_bytes(b"png")
     settings = Settings(
         paddle_endpoint="http://paddle.test:8111/",
         paddle_model="paddle-model",
-        codex_model="codex-model",
-        agy_model="agy-model",
-        default_model=ModelName.GEMINI,
     )
     selected_models: list[str] = []
 
-    def factory(model: str, *, settings: Settings, effort: str) -> RecognizerPort:
-        _ = (settings, effort)
-        selected_models.append(model)
+    def factory(*, settings: Settings) -> RecognizerPort:
+        _ = settings
+        selected_models.append("paddle")
         return SuccessfulRecognizer()
 
     monkeypatch.setattr("cli._settings", lambda: settings)
@@ -45,4 +42,4 @@ def test_cli_when_model_is_omitted_uses_configured_default(
 
     # Then: recognition receives the environment-configured model selection.
     assert result.exit_code == 0
-    assert selected_models == ["gemini"]
+    assert selected_models == ["paddle"]
