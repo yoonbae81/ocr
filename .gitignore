@@ -90,7 +90,7 @@ tempCodeRunnerFile.py
 .pypirc
 .streamlit/secrets.toml
 
-# Local OCR input/output workspace; retain the shared prompt template.
+# Ignore workspace files and folders, except the shared prompt template.
 /workspace/*
 !/workspace/prompt.md
 
