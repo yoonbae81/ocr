@@ -87,12 +87,12 @@ def test_cli_when_pdf_pages_are_requested_writes_one_canonical_file_per_page(
     # Then: each page contains its own physical-page metadata and body.
     assert result.exit_code == 0
     assert (
-        (tmp_path / "output" / "0001.md")
+        (tmp_path / "book" / "0001.md")
         .read_text(encoding="utf-8")
         .endswith("page: 1\n---\n\nrecognized 1\n")
     )
     assert (
-        (tmp_path / "output" / "0002.md")
+        (tmp_path / "book" / "0002.md")
         .read_text(encoding="utf-8")
         .endswith("page: 2\n---\n\nrecognized 2\n")
     )
@@ -119,7 +119,8 @@ def test_cli_when_image_or_zip_is_requested_uses_the_same_page_output_contract(
 
     # Then: its canonical file records the original input filename.
     assert result.exit_code == 0
-    assert f'source: "{input_name}"' in (tmp_path / "output" / "0001.md").read_text(
+    result_directory = tmp_path / Path(input_name).stem
+    assert f'source: "{input_name}"' in (result_directory / "0001.md").read_text(
         encoding="utf-8"
     )
 
@@ -165,7 +166,7 @@ def test_cli_when_retrying_failed_pages_only_retries_the_failure(
     assert recognizer.pages == [1, 2, 1]
     assert (
         "- none"
-        in (tmp_path / "output" / "status.md")
+        in (tmp_path / "scans" / "status.md")
         .read_text(encoding="utf-8")
         .split("## Failed\n", maxsplit=1)[1]
     )
@@ -190,7 +191,7 @@ def test_cli_when_a_different_input_uses_workspace_does_not_reuse_previous_statu
     # Then: it is recognized rather than resumed from the first input state.
     assert first.exit_code == second.exit_code == 0
     assert recognizer.pages == [1, 1]
-    assert 'source: "second.png"' in (tmp_path / "output" / "0001.md").read_text(
+    assert 'source: "second.png"' in (tmp_path / "second" / "0001.md").read_text(
         encoding="utf-8"
     )
 
@@ -211,7 +212,7 @@ def test_cli_when_a_toc_file_is_present_produces_identical_page_output(
 
     # Then: the contents file has no effect on the canonical page artifact.
     assert result.exit_code == 0
-    assert (tmp_path / "output" / "0001.md").is_file()
+    assert (tmp_path / "scan" / "0001.md").is_file()
 
 
 def test_cli_help_does_not_offer_legacy_output_options() -> None:

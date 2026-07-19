@@ -15,13 +15,13 @@ uv sync --dev
 cp .env.example .env
 ```
 
-문서별 작업 디렉터리에서 실행합니다.
+입력 파일을 작업 디렉터리에 직접 두고 실행합니다.
 
 ```bash
-mkdir -p workspace/book
-cp /path/to/book.pdf workspace/book/book.pdf
-cd workspace/book
-uv run --project ../.. ocr book.pdf 1-3 --model gpt
+mkdir -p workspace
+cp /path/to/book.pdf workspace/book.pdf
+cd workspace
+uv run --project .. ocr book.pdf 1-3 --model gpt
 ```
 
 ## 지원 범위
@@ -39,19 +39,19 @@ uv run --project ../.. ocr book.pdf 1-3 --model gpt
 ## 사용법
 
 ```bash
-cd workspace/book
-uv run --project ../.. ocr INPUT_FILE PAGE_OR_RANGE [OPTIONS]
+cd workspace
+uv run --project .. ocr INPUT_FILE PAGE_OR_RANGE [OPTIONS]
 ```
 
 ```bash
 # 5페이지만 PaddleOCR-VL로 인식
-uv run --project ../.. ocr book.pdf 5 --model paddle
+uv run --project .. ocr book.pdf 5 --model paddle
 
 # 5~15페이지를 GPT로 인식
-uv run --project ../.. ocr book.pdf 5-15 --model gpt --effort low
+uv run --project .. ocr book.pdf 5-15 --model gpt --effort low
 
 # 단일 이미지 입력
-uv run --project ../.. ocr scan.png 1 --model gemini
+uv run --project .. ocr scan.png 1 --model gemini
 ```
 
 | 옵션 | 설명 | 기본값 |
@@ -65,10 +65,10 @@ uv run --project ../.. ocr scan.png 1 --model gemini
 ## 출력과 재개
 
 ```text
-workspace/book/
+workspace/
 ├─ book.pdf
 ├─ prompt.md                         # 선택: OCR 전사 지시
-└─ output/
+└─ book/
    ├─ 0001.md
    ├─ 0002.md
    ├─ 0055.md
@@ -118,7 +118,8 @@ RECOGNITION_TIMEOUT=300
 
 ## 마이그레이션
 
-`--group`과 `--toc-offset`은 제거되었습니다. 결과는 항상 `output/<page>.md`이며,
+`--group`과 `--toc-offset`은 제거되었습니다. 결과는 항상
+`<입력 파일명(확장자 제외)>/<page>.md`이며,
 구조화와 참고자료 매칭은 이 저장소 밖의 후속 단계에서 수행해야 합니다.
 
 ## 개발 및 검증

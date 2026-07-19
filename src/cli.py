@@ -62,7 +62,7 @@ def ocr(
     pages = _selected_pages(page_or_range)
     source = _source_for(document)
     _validate_selection(document, pages)
-    output = MarkdownOutput(Path.cwd() / "output")
+    output = MarkdownOutput(Path.cwd() / document.name)
     document_id = document.path.resolve().as_posix()
     previous_status = output.load_status(document=document_id)
     pending = pending_pages(pages, previous_status, retry_failed=retry_failed)
