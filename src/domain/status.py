@@ -20,4 +20,3 @@ class ProcessingStatus:
     document: str | None = None
     completed: tuple[PageNumber, ...] = ()
     failures: tuple[PageFailure, ...] = ()
-    current_chapter: str | None = None

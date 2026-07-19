@@ -170,7 +170,6 @@ def test_pdf_source_prefers_sidecar_zip_images_over_pdf_text(tmp_path: Path) -> 
     # Then
     assert tuple(page.source for page in pages) == (SourceKind.ZIP, SourceKind.ZIP)
     assert tuple(page.page for page in pages) == (PageNumber(2), PageNumber(1))
-    assert tuple(page.chapter for page in pages) == (None, None)
 
 
 def test_pdf_source_uses_nonblank_text_when_no_zip_image_exists(tmp_path: Path) -> None:

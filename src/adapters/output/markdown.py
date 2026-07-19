@@ -1,13 +1,12 @@
-"""Markdown document output adapter."""
+"""Markdown output adapter for physical source pages."""
 
 from __future__ import annotations
 
+import json
 import re
-from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import TYPE_CHECKING, final, override
-from unicodedata import normalize
+from typing import final, override
 
 from adapters.output.postprocessors import (
     DEFAULT_RULE_DIRECTORY,
@@ -15,34 +14,18 @@ from adapters.output.postprocessors import (
     load_regex_rules,
 )
 from application.ports.output import DocumentOutputPort, OutputResult
-from domain.content import PageNumber
+from domain.content import PageContent, PageNumber
 from domain.errors import UnsafeOutputPathError
 from domain.status import PageFailure, ProcessingStatus
 
-if TYPE_CHECKING:
-    from domain.content import DocumentBundle, DocumentGroup, PageContent
-
-
 _STATUS_HEADING = re.compile(
-    r"^## (?P<name>Document|Completed|Failed|Current Chapter)\s*$",
-    re.MULTILINE,
+    r"^## (?P<name>Document|Completed|Failed)\s*$", re.MULTILINE
 )
-
-
-@dataclass(frozen=True, slots=True)
-class _ArtifactCollisionError(ValueError):
-    @override
-    def __str__(self) -> str:
-        return "document groups resolve to the same output artifact"
-
-
-_PAGE_MARKER_LINE = re.compile(r"^<!-- page: \d+ -->$")
-_SOURCE_MARKER_LINE = re.compile(r"^<!-- source: .+ -->$")
 
 
 @final
 class MarkdownOutput(DocumentOutputPort):
-    """Persist document bundles as Markdown artifacts in one output directory."""
+    """Persist each recognized physical page as one Markdown file."""
 
     def __init__(
         self,
@@ -50,30 +33,25 @@ class MarkdownOutput(DocumentOutputPort):
         *,
         rule_directory: Path = DEFAULT_RULE_DIRECTORY,
     ) -> None:
-        """Set the directory where this output format writes its artifacts."""
+        """Set the directory where page files and processing state are written."""
         if directory.is_symlink():
             raise UnsafeOutputPathError(directory)
-        self._directory: Path = directory
-        self._rules: tuple[RegexReplacement, ...] = load_regex_rules(rule_directory)
+        self._directory = directory
+        self._rules = load_regex_rules(rule_directory)
 
     @override
     def write(
         self,
-        bundle: DocumentBundle,
+        pages: tuple[PageContent, ...],
         status: ProcessingStatus,
+        *,
+        source_name: str,
     ) -> OutputResult:
-        """Write all group artifacts and the current processing status atomically."""
+        """Atomically write successful pages and the state describing this attempt."""
         files: list[Path] = []
-        groups = tuple(group for group in bundle.groups if group.pages)
-        paths = tuple(self._directory / _artifact_name(group) for group in groups)
-        if len(paths) != len(set(paths)):
-            raise _ArtifactCollisionError
-        for group, path in zip(groups, paths, strict=True):
-            rendered = _render_group(group, self._rules)
-            if group.name.isdecimal():
-                _write_atomically(path, rendered)
-            else:
-                _merge_blocks_atomically(path, rendered)
+        for page in pages:
+            path = self._directory / _page_filename(page.page)
+            _write_atomically(path, _render_page(page, source_name, self._rules))
             files.append(path)
         status_path = self._directory / "status.md"
         _write_atomically(status_path, _render_status(status))
@@ -81,56 +59,35 @@ class MarkdownOutput(DocumentOutputPort):
         return OutputResult(files=tuple(files))
 
     def load_status(self, *, document: str | None = None) -> ProcessingStatus:
-        """Return the previously persisted processing state when available."""
+        """Return state only when it belongs to the requested input document."""
         path = self._directory / "status.md"
         if not path.exists():
-            return ProcessingStatus()
-        status = _parse_status(path.read_text(encoding="utf-8"))
-        if document is not None and status.document != document:
             return ProcessingStatus(document=document)
-        return status
+        status = _parse_status(path.read_text(encoding="utf-8"))
+        return (
+            status
+            if document is None or status.document == document
+            else ProcessingStatus(document=document)
+        )
 
 
-def _artifact_name(group: DocumentGroup) -> Path:
-    if group.name.isdecimal():
-        return Path(f"{int(group.name)}.md")
-    if group.name == "book":
-        return Path("book.md")
-    artifact = Path(f"{_safe_name(group.name)}.md")
-    return Path(_safe_name(group.parent)) / artifact if group.parent else artifact
-
-
-def _safe_name(name: str) -> str:
-    normalized = normalize("NFKC", name)
-    tokens = "".join(
-        character if character.isalnum() or character.isspace() else ""
-        for character in normalized
-    )
-    return " ".join(tokens.split()) or "untitled"
-
-
-def _render_group(
-    group: DocumentGroup,
-    rules: tuple[RegexReplacement, ...],
-) -> str:
-    return "\n\n".join(_render_page(page, rules) for page in group.pages)
+def _page_filename(page: PageNumber) -> str:
+    return f"{page:04d}.md"
 
 
 def _render_page(
     page: PageContent,
+    source_name: str,
     rules: tuple[RegexReplacement, ...],
 ) -> str:
     body = page.body
     for rule in rules:
         body = rule.apply(body)
-    body = "\n".join(_escape_control_marker(line) for line in body.splitlines())
-    return f"<!-- page: {page.page} -->\n\n{body}\n"
-
-
-def _escape_control_marker(line: str) -> str:
-    if _PAGE_MARKER_LINE.fullmatch(line) or _SOURCE_MARKER_LINE.fullmatch(line):
-        return f"\\{line}"
-    return line
+    normalized_body = body.rstrip("\n")
+    return (
+        f"---\nsource: {json.dumps(source_name, ensure_ascii=False)}\n"
+        f"page: {page.page}\n---\n\n{normalized_body}\n"
+    )
 
 
 def _render_status(status: ProcessingStatus) -> str:
@@ -139,11 +96,9 @@ def _render_status(status: ProcessingStatus) -> str:
         "\n".join(f"- {failure.page}: {failure.reason}" for failure in status.failures)
         or "- none"
     )
-    current_chapter = status.current_chapter or "- none"
     return (
         f"# Status\n\n## Document\n{status.document or '- none'}"
-        f"\n\n## Completed\n{completed}\n\n## Failed\n{failures}"
-        f"\n\n## Current Chapter\n{current_chapter}\n"
+        f"\n\n## Completed\n{completed}\n\n## Failed\n{failures}\n"
     )
 
 
@@ -167,17 +122,10 @@ def _parse_status(content: str) -> ProcessingStatus:
         if line.startswith("- ")
         if (failure := _parse_failure(line[2:])) is not None
     )
-    chapter_lines = tuple(
-        line
-        for body in _status_section_bodies(content, "Current Chapter")
-        for line in body.splitlines()
-        if line and not line.startswith("- ")
-    )
     return ProcessingStatus(
         document=document_lines[-1] if document_lines else None,
         completed=completed,
         failures=failures,
-        current_chapter=chapter_lines[-1] if chapter_lines else None,
     )
 
 
@@ -215,51 +163,9 @@ def _write_atomically(path: Path, content: str) -> None:
     _ = temporary_path.replace(path)
 
 
-def _merge_blocks_atomically(path: Path, content: str) -> None:
-    _assert_no_symlink(path)
-    existing = path.read_text(encoding="utf-8") if path.exists() else ""
-    existing_blocks = _rendered_page_blocks(existing)
-    if existing and not existing_blocks:
-        separator = "\n\n" if existing else ""
-        _write_atomically(path, f"{existing.rstrip()}{separator}{content.lstrip()}")
-        return
-    merged = existing_blocks | _rendered_page_blocks(content)
-    ordered = "\n\n".join(merged[page] for page in sorted(merged))
-    _write_atomically(path, f"{ordered}\n")
-
-
 def _assert_no_symlink(path: Path) -> None:
     current = path
     while current != current.parent:
         if current.is_symlink():
             raise UnsafeOutputPathError(path)
         current = current.parent
-
-
-def _rendered_page_blocks(content: str) -> dict[PageNumber, str]:
-    lines = content.splitlines()
-    starts = tuple(
-        (index, page)
-        for index, line in enumerate(lines)
-        if (page := _page_marker(line)) is not None
-    )
-    blocks: dict[PageNumber, str] = {}
-    for position, (start, page) in enumerate(starts):
-        end = starts[position + 1][0] if position + 1 < len(starts) else len(lines)
-        blocks[page] = "\n".join(
-            line for line in lines[start:end] if not _source_marker(line)
-        ).strip()
-    return blocks
-
-
-def _source_marker(line: str) -> bool:
-    return line.startswith("<!-- source: ") and line.endswith(" -->")
-
-
-def _page_marker(line: str) -> PageNumber | None:
-    prefix = "<!-- page: "
-    suffix = " -->"
-    if not line.startswith(prefix) or not line.endswith(suffix):
-        return None
-    value = line.removeprefix(prefix).removesuffix(suffix)
-    return PageNumber(int(value)) if value.isdecimal() else None

@@ -1,10 +1,10 @@
-"""Format-neutral document output contract."""
+"""Page Markdown output contract."""
 
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from domain.content import DocumentBundle
+from domain.content import PageContent
 from domain.status import ProcessingStatus
 
 
@@ -16,12 +16,14 @@ class OutputResult:
 
 
 class DocumentOutputPort(Protocol):
-    """Persist a format-neutral bundle and its processing status."""
+    """Persist page artifacts and their processing status."""
 
     def write(
         self,
-        bundle: DocumentBundle,
+        pages: tuple[PageContent, ...],
         status: ProcessingStatus,
+        *,
+        source_name: str,
     ) -> OutputResult:
         """Write output artifacts and return their paths."""
         ...

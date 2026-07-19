@@ -15,20 +15,10 @@ def transcribe_page(
 ) -> PageContent:
     """Convert one source page into format-neutral page content."""
     match page:
-        case TextPage(page=number, text=text, chapter=chapter, source=source):
-            return PageContent(
-                page=number,
-                body=text,
-                chapter=chapter,
-                source=source,
-            )
-        case ImagePage(page=number, chapter=chapter, source=source):
-            return PageContent(
-                page=number,
-                body=recognizer.recognize(page, prompt),
-                chapter=chapter,
-                source=source,
-            )
+        case TextPage(page=number, text=text):
+            return PageContent(page=number, body=text)
+        case ImagePage(page=number):
+            return PageContent(page=number, body=recognizer.recognize(page, prompt))
 
 
 def transcribe_pages(

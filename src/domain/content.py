@@ -24,7 +24,6 @@ class TextPage:
     page: PageNumber
     text: str
     source: SourceKind = SourceKind.PDF_TEXT
-    chapter: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,7 +34,6 @@ class ImagePage:
     image: bytes
     media_type: str
     source: SourceKind
-    chapter: str | None = None
 
 
 type SourcePage = TextPage | ImagePage
@@ -47,21 +45,3 @@ class PageContent:
 
     page: PageNumber
     body: str
-    chapter: str | None = None
-    source: SourceKind | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class DocumentGroup:
-    """An ordered group of page content for one output artifact."""
-
-    name: str
-    pages: tuple[PageContent, ...]
-    parent: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class DocumentBundle:
-    """Format-neutral groups emitted by the OCR pipeline."""
-
-    groups: tuple[DocumentGroup, ...]
