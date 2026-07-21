@@ -97,3 +97,5 @@ tempCodeRunnerFile.py
 # Local agent metadata
 .omo/
 .codegraph
+
+.DS_Store
