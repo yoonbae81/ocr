@@ -1,1 +1,1 @@
-"""External implementations of application ports."""
+"""Outbound adapter implementations."""

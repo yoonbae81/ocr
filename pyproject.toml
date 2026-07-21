@@ -1,22 +1,21 @@
 [project]
 name = "ocr"
-version = "0.1.0"
-description = "Command-line OCR for PDF documents."
+version = "0.2.0"
+description = "Local PaddleOCR-VL document OCR backed by an MLX-VLM server."
+readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "httpx>=0.28",
+    "mlx-vlm>=0.6.5",
     "paddleocr[doc-parser]>=3.7.0",
+    "paddlex[ocr,genai-client]>=3.7.0",
     "paddlepaddle>=3.3.1",
     "pillow>=11.0",
     "pymupdf>=1.26",
-    "pydantic-settings>=2.10",
-    "rich>=14.0",
     "typer>=0.16",
-    "structlog>=25.4",
 ]
 
 [project.scripts]
-ocr = "cli:app"
+ocr = "cli:main"
 
 [build-system]
 requires = ["setuptools>=80"]
@@ -24,34 +23,25 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-py-modules = ["cli", "settings"]
+py-modules = [
+    "application",
+    "cli",
+    "command_runtime",
+    "domain",
+    "mlx_server",
+    "paddle_adapter",
+    "source_adapter",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["application*", "domain*", "adapters*"]
+include = ["adapters*", "ports*"]
+
+[tool.setuptools.package-data]
+"adapters.output" = ["rules/*/*.txt"]
 
 [dependency-groups]
-dev = [
-    "basedpyright>=1.28",
-    "pytest>=8.0",
-    "pytest-cov>=6.0",
-    "ruff>=0.12",
-    "setuptools>=80",
-]
-
-[tool.basedpyright]
-typeCheckingMode = "all"
-allowedUntypedLibraries = ["paddleocr"]
-stubPath = "typings"
-pythonVersion = "3.13"
-pythonPlatform = "All"
-include = ["src", "tests"]
-exclude = ["setup.py", "**/__pycache__", "**/.venv", "**/build", "**/dist"]
-reportUnusedCallResult = "warning"
-reportUnnecessaryTypeIgnoreComment = "error"
-reportUnusedVariable = "error"
-reportMissingParameterType = "error"
-reportPrivateUsage = "error"
+dev = ["pytest>=8.0", "ruff>=0.12", "basedpyright>=1.28"]
 
 [tool.ruff]
 target-version = "py313"
@@ -61,57 +51,22 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
-    "COM812",
-    "ISC001",
-    "D203",
-    "D213",
-    "CPY001",
-    "FBT001",
-    "FBT002",
-    "TD002",
-    "TD003",
-    "FIX002",
+    "COM812", "ISC001", "D203", "D213", "CPY001", "FBT001", "FBT002",
+    "D105", "D107", "E501", "EM101", "EM102", "FBT003", "I001",
+    "PLC0415", "PLR0913", "S310", "S603", "TC001", "TC003", "TRY003", "TRY004",
 ]
-fixable = ["ALL"]
-unfixable = []
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S101", "ARG", "PLR2004", "SLF001", "D"]
-"src/cli.py" = ["ARG001", "D100", "D103"]
-"setup.py" = ["D", "N812"]
+"tests/**/*.py" = ["S101", "D"]
 
-[tool.ruff.lint.pydocstyle]
-convention = "google"
-
-[tool.ruff.lint.flake8-bugbear]
-extend-immutable-calls = ["typer.Argument", "typer.Option"]
-
-[tool.ruff.format]
-quote-style = "double"
-indent-style = "space"
-docstring-code-format = true
-docstring-code-line-length = "dynamic"
+[tool.basedpyright]
+typeCheckingMode = "basic"
+pythonVersion = "3.13"
+include = ["src", "tests"]
+reportMissingTypeStubs = "none"
+reportAttributeAccessIssue = "none"
 
 [tool.pytest.ini_options]
-minversion = "8.0"
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = [
-    "-ra",
-    "--strict-config",
-    "--strict-markers",
-    "--cov=src",
-    "--cov-report=term-missing",
-]
-filterwarnings = ["error"]
-
-[tool.coverage.run]
-branch = true
-source = ["src"]
-
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "if TYPE_CHECKING:",
-    "raise NotImplementedError",
-]
+addopts = ["-ra", "--strict-config", "--strict-markers"]

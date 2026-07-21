@@ -1,114 +1,132 @@
-# OCR
+# Local OCR
 
-로컬 PDF, 단일 이미지, 이미지 ZIP에서 선택한 물리 페이지를 OCR하여 페이지별 Markdown
-정본으로 저장하는 Python CLI입니다. 이 도구는 원본 페이지 OCR과 처리 상태만 관리합니다.
-문서 구조화나 참고자료 매칭은 별도 단계의 책임입니다.
+## 설치 / 사용법
 
-## 빠른 시작
+요구사항: Apple Silicon macOS, `uv`
 
-Python 3.13 이상과 [uv](https://docs.astral.sh/uv)가 필요합니다.
-
-```bash
-git clone <repository-url>
+```zsh
+git clone <repository-url> ocr
 cd ocr
-uv sync --dev
-cp .env.example .env
+make install
 ```
 
-입력 파일을 작업 디렉터리에 직접 두고 실행합니다.
+`make install`은 `uv sync --all-groups`로 의존성을 맞추고, 프로젝트를 editable 모드로 등록한 뒤 현재 셸에서 `ocr` 실행 경로를 등록합니다.
 
-```bash
-mkdir -p workspace
-cp /path/to/book.pdf workspace/book.pdf
-cd workspace
-uv run --project .. ocr book.pdf 1-3
+설치 후:
+
+```zsh
+ocr --help
+ocr /path/to/book.pdf 1-3
+ocr /path/to/scan.jpg 1
+ocr "*.pdf" 1-3
 ```
 
-## 지원 범위
+개발 중에는 `make sync`, `make test`, `make lint`, `make typecheck`, `make check`를 사용할 수 있습니다.
 
-- 입력: `.pdf`, `.jpg`, `.jpeg`, `.png`, 이미지가 든 `.zip`
-- 페이지 선택: 양의 정수(`5`) 또는 오름차순 범위(`5-15`)
-- 출력: 원본 물리 페이지마다 Markdown 파일 하나
-- 인식 백엔드: PaddleOCR-VL
-- 완료/실패 상태 저장과 실패 페이지만 재시도
+`uv`를 쓰지 않거나 전역 설치를 원하지 않을 때는 아래처럼 바로 실행할 수 있습니다.
 
-단일 이미지는 논리적 1페이지만 지원합니다. ZIP 안의 이미지 파일은 파일명 끝의 숫자를
-페이지 번호로 사용합니다. 예를 들어 `page-001.png`은 1페이지입니다.
-
-## 사용법
-
-```bash
-cd workspace
-uv run --project .. ocr INPUT_FILE PAGE_OR_RANGE [OPTIONS]
+```zsh
+uv run ocr /path/to/book.pdf 1-3
 ```
 
-```bash
-# 5~15페이지를 PaddleOCR-VL로 인식
-uv run --project .. ocr book.pdf 5-15
+## 기본 동작
 
-# 단일 이미지 입력
-uv run --project .. ocr scan.png 1
-```
+- 입력: PDF/이미지/ZIP
+- 출력: 현재는 **Markdown**만 지원
+- 출력 대상 폴더: 실행 디렉터리에 입력 파일명과 동일한 폴더를 만들고 페이지별로 `1.md`, `2.md` ... 저장
+- 이미지: `img/` 하위에 본문에서 추출된 이미지 영역만 저장
+  - 파일명 규칙: `<page>_<start_x>_<start_y>_<end_x>_<end_y>.jpg`
 
-| 옵션 | 설명 | 기본값 |
-| --- | --- | --- |
-| `--retry-failed` | 기록된 실패 페이지만 다시 처리 | 꺼짐 |
-
-한 페이지 이상이 실패하면 실패 내용을 저장한 뒤 종료 코드 `1`로 끝납니다.
-
-## 출력과 재개
+예시:
 
 ```text
-workspace/
-├─ book.pdf
-└─ book/
-   ├─ 0001.md
-   ├─ 0002.md
-   ├─ 0055.md
-   └─ status.md
+./book/
+├── 1.md
+├── 2.md
+└── img/
+    └── 2_369_1899_1903_2660.jpg
 ```
 
-모든 성공 페이지는 원본 물리 페이지 번호를 최소 네 자리로 0 채워 저장합니다. 10,000쪽
-이상은 자릿수를 늘려 그대로 저장하므로 충돌하지 않습니다. 각 파일에는 입력 파일명과
-페이지 번호를 가진 YAML front matter가 있고, 본문은 해당 페이지 OCR 결과만 담습니다.
+`ocr`는 페이지 번호가 1부터 시작하는 “물리 페이지” 기준으로 인식합니다.
 
-```markdown
----
-source: "book.pdf"
-page: 55
----
+## CLI 사용 예
 
-OCR 본문
+```zsh
+# 1~3쪽만 처리
+ocr /path/to/book.pdf 1-3
+
+# 현재 폴더의 PDF를 순차 처리
+ocr "*.pdf" 1-3
+
+# 페이지 점프(1,5~8)
+ocr /path/to/book.pdf 1,5-8
+
+# 출력 덮어쓰기
+ocr /path/to/book.pdf 1-3 --replace
+
+# 이미 생성된 파일 건너뛰기(재시작)
+ocr /path/to/book.pdf 1-3 --resume
+
+# 배치/캐시/성능 제어
+ocr /path/to/book.pdf 1-3 --batch-size 8 --cache-dir ~/.cache/ocr/raw
+ocr /path/to/book.pdf 1-3 --no-cache
+ocr /path/to/book.pdf 1-3 --server-url http://127.0.0.1:9010 --vl-concurrency 4
+ocr /path/to/book.pdf 1-3 --profile
 ```
 
-`status.md`는 입력 문서 식별자, 완료 페이지, 실패 페이지와 원인을 기록합니다. 같은 입력
-문서를 다시 실행하면 완료 페이지는 건너뛰며, `--retry-failed`는 실패한 페이지만 다시
-OCR합니다. 다른 입력 문서를 같은 작업 디렉터리에서 실행하면 이전 상태를 재개에 쓰지
-않습니다.
+명령 형식: `ocr <파일/패턴> <페이지>`
 
-## 인식 방식과 설정
+옵션 요약:
 
-PaddleOCR-VL 서비스에 접근할 수 있어야 하며, `.env`에 엔드포인트와 모델을 설정합니다.
+- `pages`(필수 위치 인자): `1,5-8` 형식 지정
+- `--dpi`: PDF 렌더링 해상도 (기본값 300)
+- `--zip-prefix`: ZIP 내부 파일명 충돌 방지용 프리픽스
+- `--replace`: 기존 페이지 덮어쓰기
+- `--resume`: 이미 존재하는 페이지 스킵
+- `--batch-size`: Paddle 페이지 배치 크기(기본 4)
+- `--cache/--no-cache`: OCR 원문 캐시 사용 여부(기본 사용)
+- `--cache-dir`: 캐시 경로 지정
+- `--server-url`: 이미 실행 중인 MLX 서버에 연결
+- `--vl-concurrency`: VL 요청 동시성 상한
+- `--profile`: 준비/캐시/인식/전체 시간 출력
 
-```dotenv
-PADDLE_ENDPOINT=http://localhost:8111/
-PADDLE_MODEL=matrixmaven/PaddleOCR-VL-1.6-MLX
-CONCURRENCY=1
-RECOGNITION_TIMEOUT=300
-```
+## 아키텍처(헥사고날)
 
+현재 구조:
 
-## 마이그레이션
+- `cli.py`: `typer` CLI 진입점
+- `application.py`: 페이지 선택·캐시 사용·인식 결과 기록 플로우
+- `paddle_adapter.py`: PaddleOCR-VL 호출 어댑터
+- `mlx_server.py`: 로컬 MLX 서버 생명주기 관리
+- `source_adapter.py`: PDF/JPG/PNG/WEBP/ZIP 입력 해석
+- `ports/cache.py`, `ports/output.py`: 포트(인터페이스)
+- `adapters/cache/*`: 캐시 어댑터 (`filesystem`, `disabled`)
+- `adapters/output/*`: 출력 어댑터(`markdown`)
 
-`--group`과 `--toc-offset`은 제거되었습니다. 결과는 항상
-`<입력 파일명(확장자 제외)>/<page>.md`이며,
-구조화와 참고자료 매칭은 이 저장소 밖의 후속 단계에서 수행해야 합니다.
+핵심 포인트:
 
-## 개발 및 검증
+- 캐시는 렌더된 페이지 이미지 바이트 + 모델 이름으로 키를 만들어 저장됩니다.
+- 캐시 히트가 있으면 해당 페이지는 재인식을 하지 않아도 됩니다.
+- 캐시 미스가 있고 `--server-url`이 없으면 현재 프로세스가 MLX 서버를 자동으로 띄우고 완료 후 종료합니다.
+- `--resume`은 기존 Markdown 파일이 이미 있으면 OCR 단계 자체를 건너뜁니다.
 
-```bash
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
-uv run basedpyright
-```
+## Postprocess(후처리) 구조
+
+`markdown` 출력은 `MarkdownPageExporter`가 페이지 저장 전에 후처리를 수행합니다.
+
+현재 규칙 저장 위치:
+
+- `src/adapters/output/rules/markdown/base.txt`
+- `src/adapters/output/rules/markdown/img.txt`
+
+`base.txt`는 공통 텍스트 정리 규칙(예: \\underline 텍스트 정리)이고,
+`img.txt`는 이미지 정렬/표기 정리 규칙 같은 도메인 특화 규칙을 분리해 둔 형태입니다.
+
+규칙은 `src/adapters/output/markdown_postprocessor.py`에서 로드되어 Markdown 최종 텍스트에 적용됩니다.
+
+포맷이 늘어나면(`epub` 등) `src/adapters/output/rules/epub/*.txt`처럼 포맷 단위로 규칙을 추가하면 됩니다.
+
+## 참고
+
+- 기본 설치/실행 경로가 바뀌지 않도록 `make install`/`make uninstall`을 권장합니다.
+- 개발 의존성은 `uv`로 관리하며, 패키지 내 규칙 파일도 설치 패키지 데이터로 포함됩니다.

@@ -1,171 +1,124 @@
-"""Markdown output adapter for physical source pages."""
-
 from __future__ import annotations
 
-import json
 import re
+from itertools import chain
 from pathlib import Path
-from tempfile import NamedTemporaryFile
-from typing import final, override
+from typing import Final
 
-from adapters.output.postprocessors import (
-    DEFAULT_RULE_DIRECTORY,
-    RegexReplacement,
-    load_regex_rules,
+from PIL import Image
+
+from domain import PageMarkdown, PageNumber, SourcePage
+
+_TABLE_CELL_PATTERN: Final = re.compile(
+    r"(<t[dh]\b[^>]*>)(.*?)(</t[dh]>)", re.DOTALL | re.IGNORECASE
 )
-from application.ports.output import DocumentOutputPort, OutputResult
-from domain.content import PageContent, PageNumber
-from domain.errors import UnsafeOutputPathError
-from domain.status import PageFailure, ProcessingStatus
+_CENTERED_IMAGE_PATTERN: Final = re.compile(
+    r'<div\b[^>]*>\s*<img\s+src="(?P<src>[^"]+)"\s+'
+    r'alt="(?P<alt>[^"]*)"[^>]*/?>\s*</div>',
+    re.IGNORECASE,
+)
+_CROP_SOURCE_PATTERN: Final = re.compile(
+    r"img_in_image_box_(?P<start_x>\d+)_(?P<start_y>\d+)_"
+    r"(?P<end_x>\d+)_(?P<end_y>\d+)\.(?:jpe?g|png|webp)$",
+    re.IGNORECASE,
+)
+_RULES_DIR: Final = Path(__file__).with_name("rules") / "markdown"
+_RULE_PATHS: Final = tuple(sorted(_RULES_DIR.glob("*.txt")))
+_RULE_LINE_PARTS: Final = 2
 
-_STATUS_HEADING = re.compile(
-    r"^## (?P<name>Document|Completed|Failed)\s*$", re.MULTILINE
+
+def _load_regex_rules(path: Path) -> tuple[tuple[re.Pattern[str], str], ...]:
+    loaded: list[tuple[re.Pattern[str], str]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("\t", maxsplit=1)
+        if len(parts) != _RULE_LINE_PARTS:
+            continue
+        pattern, replacement = parts
+        loaded.append((re.compile(pattern), replacement))
+    return tuple(loaded)
+
+
+_REGEX_RULES: Final = tuple(
+    chain.from_iterable(_load_regex_rules(path) for path in _RULE_PATHS)
 )
 
 
-@final
-class MarkdownOutput(DocumentOutputPort):
-    """Persist each recognized physical page as one Markdown file."""
+def normalize_markdown(result: PageMarkdown, image_directory: Path) -> str:
+    normalized = _normalize_table_breaks(result.text)
+    normalized = _normalize_images(normalized, result.page, image_directory)
+    return _apply_regex_rules(normalized, _REGEX_RULES)
 
-    def __init__(
-        self,
-        directory: Path,
-        *,
-        rule_directory: Path = DEFAULT_RULE_DIRECTORY,
-    ) -> None:
-        """Set the directory where page files and processing state are written."""
-        if directory.is_symlink():
-            raise UnsafeOutputPathError(directory)
-        self._directory = directory
-        self._rules = load_regex_rules(rule_directory)
 
-    @override
-    def write(
-        self,
-        pages: tuple[PageContent, ...],
-        status: ProcessingStatus,
-        *,
-        source_name: str,
-    ) -> OutputResult:
-        """Atomically write successful pages and the state describing this attempt."""
-        files: list[Path] = []
-        for page in pages:
-            path = self._directory / _page_filename(page.page)
-            _write_atomically(path, _render_page(page, source_name, self._rules))
-            files.append(path)
-        status_path = self._directory / "status.md"
-        _write_atomically(status_path, _render_status(status))
-        files.append(status_path)
-        return OutputResult(files=tuple(files))
+def _normalize_table_breaks(text: str) -> str:
+    return _TABLE_CELL_PATTERN.sub(_replace_table_cell, text)
 
-    def load_status(self, *, document: str | None = None) -> ProcessingStatus:
-        """Return state only when it belongs to the requested input document."""
-        path = self._directory / "status.md"
-        if not path.exists():
-            return ProcessingStatus(document=document)
-        status = _parse_status(path.read_text(encoding="utf-8"))
-        return (
-            status
-            if document is None or status.document == document
-            else ProcessingStatus(document=document)
+
+def _normalize_images(text: str, page: SourcePage, image_directory: Path) -> str:
+    has_crop = any(
+        _CROP_SOURCE_PATTERN.search(match.group("src"))
+        for match in _CENTERED_IMAGE_PATTERN.finditer(text)
+    )
+    if not has_crop:
+        return _CENTERED_IMAGE_PATTERN.sub(_replace_image_reference, text)
+    image_directory.mkdir(parents=True, exist_ok=True)
+    with Image.open(page.image_path) as source_image:
+        return _CENTERED_IMAGE_PATTERN.sub(
+            lambda match: _replace_image(match, page, image_directory, source_image),
+            text,
         )
 
 
-def _page_filename(page: PageNumber) -> str:
-    return f"{page:04d}.md"
-
-
-def _render_page(
-    page: PageContent,
-    source_name: str,
-    rules: tuple[RegexReplacement, ...],
+def _apply_regex_rules(
+    text: str, rules: tuple[tuple[re.Pattern[str], str], ...]
 ) -> str:
-    body = page.body
-    for rule in rules:
-        body = rule.apply(body)
-    normalized_body = body.rstrip("\n")
-    return (
-        f"---\nsource: {json.dumps(source_name, ensure_ascii=False)}\n"
-        f"page: {page.page}\n---\n\n{normalized_body}\n"
+    for pattern, replacement in rules:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def _replace_table_cell(match: re.Match[str]) -> str:
+    content = match.group(2).replace("\\n", "<br/>").replace("\n", "<br/>")
+    return f"{match.group(1)}{content}{match.group(3)}"
+
+
+def _replace_image_reference(match: re.Match[str]) -> str:
+    return f"![{match.group('alt')}]({match.group('src')})"
+
+
+def _replace_image(
+    match: re.Match[str],
+    page: SourcePage,
+    image_directory: Path,
+    source_image: Image.Image,
+) -> str:
+    coordinates = _CROP_SOURCE_PATTERN.search(match.group("src"))
+    if coordinates is None:
+        return _replace_image_reference(match)
+    start_x = int(coordinates.group("start_x"))
+    start_y = int(coordinates.group("start_y"))
+    end_x = int(coordinates.group("end_x"))
+    end_y = int(coordinates.group("end_y"))
+    image_name = f"{page.number.value}_{start_x}_{start_y}_{end_x}_{end_y}.jpg"
+    source_image.crop((start_x, start_y, end_x, end_y)).convert("RGB").save(
+        image_directory / image_name, "JPEG", quality=95
     )
+    return f"![{match.group('alt')}](img/{image_name})"
 
 
-def _render_status(status: ProcessingStatus) -> str:
-    completed = "\n".join(f"- {page}" for page in status.completed) or "- none"
-    failures = (
-        "\n".join(f"- {failure.page}: {failure.reason}" for failure in status.failures)
-        or "- none"
-    )
-    return (
-        f"# Status\n\n## Document\n{status.document or '- none'}"
-        f"\n\n## Completed\n{completed}\n\n## Failed\n{failures}\n"
-    )
+class MarkdownPageExporter:
 
+    def is_exported(self, page: PageNumber, destination: Path) -> bool:
+        return (destination / f"{page.value}.md").exists()
 
-def _parse_status(content: str) -> ProcessingStatus:
-    document_lines = tuple(
-        line
-        for body in _status_section_bodies(content, "Document")
-        for line in body.splitlines()
-        if line and not line.startswith("- ")
-    )
-    completed = tuple(
-        PageNumber(int(item))
-        for body in _status_section_bodies(content, "Completed")
-        for line in body.splitlines()
-        if line.startswith("- ") and (item := line[2:]).isdecimal()
-    )
-    failures = tuple(
-        failure
-        for body in _status_section_bodies(content, "Failed")
-        for line in body.splitlines()
-        if line.startswith("- ")
-        if (failure := _parse_failure(line[2:])) is not None
-    )
-    return ProcessingStatus(
-        document=document_lines[-1] if document_lines else None,
-        completed=completed,
-        failures=failures,
-    )
-
-
-def _status_section_bodies(content: str, name: str) -> tuple[str, ...]:
-    headings = tuple(_STATUS_HEADING.finditer(content))
-    return tuple(
-        content[heading.end() : headings[index + 1].start()]
-        if index + 1 < len(headings)
-        else content[heading.end() :]
-        for index, heading in enumerate(headings)
-        if heading.group("name") == name
-    )
-
-
-def _parse_failure(item: str) -> PageFailure | None:
-    page, separator, reason = item.partition(": ")
-    if not separator or not page.isdecimal():
-        return None
-    return PageFailure(page=PageNumber(int(page)), reason=reason)
-
-
-def _write_atomically(path: Path, content: str) -> None:
-    _assert_no_symlink(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        dir=path.parent,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        delete=False,
-    ) as temporary_file:
-        temporary_path = Path(temporary_file.name)
-        _ = temporary_file.write(content)
-    _ = temporary_path.replace(path)
-
-
-def _assert_no_symlink(path: Path) -> None:
-    current = path
-    while current != current.parent:
-        if current.is_symlink():
-            raise UnsafeOutputPathError(path)
-        current = current.parent
+    def export(self, result: PageMarkdown, destination: Path, replace: bool) -> None:
+        markdown_path = destination / f"{result.page.number.value}.md"
+        if markdown_path.exists() and not replace:
+            raise FileExistsError(f"Output exists; pass --replace: {markdown_path}")
+        destination.mkdir(parents=True, exist_ok=True)
+        image_directory = destination / "img"
+        markdown_path.write_text(
+            normalize_markdown(result, image_directory).strip() + "\n",
+            encoding="utf-8",
+        )
