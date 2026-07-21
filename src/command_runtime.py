@@ -18,8 +18,9 @@ from application import (
     select_export_pages,
 )
 from domain import PageNumber, SourcePage
-from ports import PageRecognizer, PageSource
-from source_adapter import ImageSourceAdapter, PdfSourceAdapter, ZipSourceAdapter
+from adapters.source import ImageSourceAdapter, PdfSourceAdapter, ZipSourceAdapter
+from ports import PageRecognizer
+from ports.source import PageSource
 
 
 MODEL = "matrixmaven/PaddleOCR-VL-1.6-MLX"

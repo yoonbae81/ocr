@@ -29,9 +29,7 @@ py-modules = [
     "command_runtime",
     "domain",
     "mlx_server",
-    "paddle_adapter",
-    "source_adapter",
-]
+    ]
 
 [tool.setuptools.packages.find]
 where = ["src"]

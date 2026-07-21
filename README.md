@@ -96,9 +96,10 @@ ocr /path/to/book.pdf 1-3 --profile
 
 - `cli.py`: `typer` CLI 진입점
 - `application.py`: 페이지 선택·캐시 사용·인식 결과 기록 플로우
-- `paddle_adapter.py`: PaddleOCR-VL 호출 어댑터
+- `adapters/recognition/paddle.py`: PaddleOCR-VL 호출 어댑터
 - `mlx_server.py`: 로컬 MLX 서버 생명주기 관리
-- `source_adapter.py`: PDF/JPG/PNG/WEBP/ZIP 입력 해석
+- `ports/source.py`: 입력 소스 포트(계약)
+- `adapters/source/{image.py,pdf.py,zip.py}`: PDF/JPG/PNG/WEBP/ZIP 입력 구현
 - `ports/cache.py`, `ports/output.py`: 포트(인터페이스)
 - `adapters/cache/*`: 캐시 어댑터 (`filesystem`, `disabled`)
 - `adapters/output/*`: 출력 어댑터(`markdown`)

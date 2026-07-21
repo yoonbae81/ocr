@@ -13,7 +13,7 @@ from typing import Annotated
 from command_runtime import MODEL, RunOptions, run_source
 from domain import PageNumber
 from mlx_server import MlxServerAdapter
-from paddle_adapter import PaddleOcrVlAdapter
+from adapters.recognition import PaddleOcrVlAdapter
 from ports import PageRecognizer
 
 

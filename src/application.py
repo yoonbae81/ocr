@@ -6,7 +6,8 @@ from itertools import batched
 from pathlib import Path
 
 from domain import PageNumber, SourcePage
-from ports import PageRecognizer, PageSource
+from ports import PageRecognizer
+from ports.source import PageSource
 from ports.cache import RecognitionCache
 from ports.output import PageExporter
 

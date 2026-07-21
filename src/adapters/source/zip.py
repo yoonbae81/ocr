@@ -1,58 +1,14 @@
-"""PDF and raster-image implementations of the page-source port."""
+"""ZIP source adapter for image-page archives."""
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
-from shutil import copyfile
 from zipfile import ZipFile
 
 import re
 
-import fitz
-
 from domain import PageNumber, SourcePage
-
-
-class PdfSourceAdapter:
-    """Rasterize selected PDF pages into a command-scoped temporary directory."""
-
-    def __init__(self, source: Path, dpi: int, temporary: Path) -> None:
-        self._source = source
-        self._dpi = dpi
-        self._temporary = temporary
-
-    def pages(self, selection: tuple[PageNumber, ...] | None) -> Iterator[SourcePage]:
-        """Render requested PDF pages as JPEG images."""
-        with fitz.open(self._source) as document:
-            numbers = selection or tuple(
-                PageNumber(index + 1) for index in range(document.page_count)
-            )
-            for number in numbers:
-                if number.value > document.page_count:
-                    raise ValueError(f"Page {number.value} exceeds PDF page count.")
-                image_path = self._temporary / f"{number.value}.jpg"
-                document.load_page(number.value - 1).get_pixmap(dpi=self._dpi).save(
-                    image_path
-                )
-                yield SourcePage(number, image_path)
-
-
-class ImageSourceAdapter:
-    """Copy one raster input into the command-scoped page workspace."""
-
-    def __init__(self, source: Path, temporary: Path) -> None:
-        self._source = source
-        self._temporary = temporary
-
-    def pages(self, selection: tuple[PageNumber, ...] | None) -> Iterator[SourcePage]:
-        """Yield the only physical page after validating the selection."""
-        requested = selection or (PageNumber(1),)
-        if requested != (PageNumber(1),):
-            raise ValueError("A single image supports only page 1.")
-        image_path = self._temporary / f"1{self._source.suffix.lower()}"
-        copyfile(self._source, image_path)
-        yield SourcePage(PageNumber(1), image_path)
 
 
 class ZipSourceAdapter:

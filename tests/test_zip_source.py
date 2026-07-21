@@ -2,7 +2,7 @@ from pathlib import Path
 from zipfile import ZipFile
 
 from domain import PageNumber
-from source_adapter import ZipSourceAdapter
+from adapters.source import ZipSourceAdapter
 
 
 def test_zip_source_selects_requested_filename_prefix(tmp_path: Path) -> None:

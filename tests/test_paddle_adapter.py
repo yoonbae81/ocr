@@ -5,7 +5,7 @@ from types import ModuleType
 
 import pytest
 
-from paddle_adapter import PaddleOcrVlAdapter
+from adapters.recognition import PaddleOcrVlAdapter
 from domain import PageNumber, SourcePage
 
 

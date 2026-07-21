@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from source_adapter import ImageSourceAdapter
+from adapters.source import ImageSourceAdapter
 
 
 def test_image_source_copies_original_image_without_reencoding(tmp_path: Path) -> None:
