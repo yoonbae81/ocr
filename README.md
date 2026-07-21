@@ -104,6 +104,11 @@ ocr /path/to/book.pdf 1-3 --profile
 - `adapters/cache/*`: 캐시 어댑터 (`filesystem`, `disabled`)
 - `adapters/output/*`: 출력 어댑터(`markdown`)
 
+참고:
+
+- `paddle_adapter.py`와 `source_adapter.py`는 더 이상 루트 모듈로 존재하지 않습니다.
+- 현재는 `adapters/recognition`, `adapters/source`, `ports/source`를 통해 구현이 구성되어 있습니다.
+
 핵심 포인트:
 
 - 캐시는 렌더된 페이지 이미지 바이트 + 모델 이름으로 키를 만들어 저장됩니다.
