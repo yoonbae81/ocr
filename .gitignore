@@ -90,9 +90,7 @@ tempCodeRunnerFile.py
 .pypirc
 .streamlit/secrets.toml
 
-# Ignore workspace files and folders, except the shared prompt template.
 /workspace/*
-!/workspace/prompt.md
 
 # Local agent metadata
 .omo/

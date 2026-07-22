@@ -14,6 +14,25 @@ from domain import PageNumber
 
 runner = CliRunner()
 INVALID_USAGE_EXIT_CODE = 2
+RICH_PANEL_CHARACTERS = ("╭", "╮", "╯", "╰", "│")
+
+
+def test_cli_errors_use_plain_text(tmp_path: Path) -> None:
+    missing_source = tmp_path / "missing.pdf"
+
+    result = runner.invoke(cli.app, [str(missing_source)])
+
+    assert result.exit_code == INVALID_USAGE_EXIT_CODE
+    assert "Error: Invalid value" in result.output
+    assert not any(character in result.output for character in RICH_PANEL_CHARACTERS)
+
+
+def test_cli_help_uses_plain_text() -> None:
+    result = runner.invoke(cli.app, ["--help"])
+
+    assert result.exit_code == 0
+    assert "Usage:" in result.output
+    assert not any(character in result.output for character in RICH_PANEL_CHARACTERS)
 
 
 @pytest.mark.parametrize("pages", ["0", "-1", "abc", "1-", "3-1"])

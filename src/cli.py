@@ -22,7 +22,12 @@ from settings import load_settings
 
 
 MAX_SELECTED_PAGES = 10_000
-app = typer.Typer(no_args_is_help=True, add_completion=False)
+app = typer.Typer(
+    no_args_is_help=True,
+    add_completion=False,
+    rich_markup_mode=None,
+    pretty_exceptions_enable=False,
+)
 _SETTINGS = load_settings()
 
 

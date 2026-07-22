@@ -121,6 +121,41 @@ $env:OCR_LAYOUT_MODEL_PATH = Join-Path $layoutRoot "DocLayoutV3.xml"
 python -m uv run python -m install_config --backend openvino
 ```
 
+어느 작업 폴더에서나 `ocr`를 실행하려면 현재 저장소에서 uv 도구로 전역
+(사용자 계정 범위) 설치합니다. `uv`가 PATH에 없으면 아래처럼 `python -m uv`로
+실행할 수 있습니다.
+
+```powershell
+python -m uv tool install --editable ".[openvino]" --force
+python -m uv tool update-shell
+```
+
+PowerShell을 새로 연 뒤 다음으로 확인합니다.
+
+```powershell
+Get-Command ocr
+ocr --help
+```
+
+일부 Windows 보안 정책은 uv가 생성한 `ocr.exe` trampoline을 차단할 수 있습니다.
+이때는 사용자 도구 디렉터리에 Python을 직접 호출하는 `ocr.cmd` 래퍼를 만들고,
+차단된 `ocr.exe`의 이름을 바꿔 `.cmd`가 선택되도록 합니다.
+
+```powershell
+$bin = Join-Path $env:USERPROFILE ".local\bin"
+@"
+@echo off
+"%APPDATA%\uv\tools\ocr\Scripts\python.exe" -c "import sys; sys.argv[0]='ocr'; from cli import main; main()" %*
+"@ | Set-Content -Encoding ascii (Join-Path $bin "ocr.cmd")
+Rename-Item (Join-Path $bin "ocr.exe") "ocr-uv-trampoline.exe"
+$env:Path = "$bin;$env:Path"
+ocr --help
+```
+
+`%USERPROFILE%\.local\bin`과 Python Scripts 디렉터리가 PATH에 없으면
+`python -m uv`는 계속 사용할 수 있지만 `ocr` 명령은 새 PowerShell에서 보이지
+않습니다. `python -m uv tool update-shell`을 실행한 뒤 PowerShell을 다시 여세요.
+
 한국어 Windows의 기본 CP949 콘솔에서는 의존 라이브러리가 출력하는 이모지 때문에
 `UnicodeEncodeError`가 발생할 수 있습니다. 그런 경우 실행 프로세스에 UTF-8 모드를
 지정합니다.
