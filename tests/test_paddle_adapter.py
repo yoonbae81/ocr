@@ -5,7 +5,7 @@ from types import ModuleType
 
 import pytest
 
-from adapters.recognition import PaddleOcrVlAdapter
+from adapters.recognition import MlxPaddleRecognizerAdapter
 from domain import PageNumber, SourcePage
 
 
@@ -20,7 +20,7 @@ def test_adapter_passes_mlx_server_model_name(monkeypatch: pytest.MonkeyPatch) -
     fake_module.PaddleOCRVL = FakePaddleOCRVL
     monkeypatch.setitem(sys.modules, "paddleocr", fake_module)
 
-    PaddleOcrVlAdapter(
+    MlxPaddleRecognizerAdapter(
         "http://127.0.0.1:1234", "matrixmaven/PaddleOCR-VL-1.6-MLX"
     )
 
@@ -58,7 +58,9 @@ def test_adapter_recognizes_page_batch_with_one_pipeline_call(
     )
 
     results = tuple(
-        PaddleOcrVlAdapter("http://127.0.0.1:1234", "model").recognize_many(pages)
+        MlxPaddleRecognizerAdapter(
+            "http://127.0.0.1:1234", "model"
+        ).recognize_many(pages)
     )
 
     assert received == [str(page.image_path) for page in pages]
@@ -77,7 +79,7 @@ def test_adapter_configures_vl_concurrency(monkeypatch: pytest.MonkeyPatch) -> N
     fake_module.PaddleOCRVL = FakePaddleOCRVL
     monkeypatch.setitem(sys.modules, "paddleocr", fake_module)
 
-    PaddleOcrVlAdapter(
+    MlxPaddleRecognizerAdapter(
         "http://127.0.0.1:1234",
         "model",
         max_concurrency=expected_concurrency,

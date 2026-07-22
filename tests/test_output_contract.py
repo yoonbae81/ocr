@@ -15,7 +15,7 @@ def test_export_writes_numbered_markdown_without_page_image(tmp_path: Path) -> N
         PageMarkdown(page, "text"), tmp_path / "book", False
     )
 
-    assert (tmp_path / "book" / "2.md").read_text() == "text\n"
+    assert (tmp_path / "book" / "0002.md").read_text() == "text\n"
     assert not (tmp_path / "book" / "img").exists()
 
 
@@ -37,12 +37,12 @@ def test_export_normalizes_table_breaks_and_images_to_markdown(tmp_path: Path) -
         False,
     )
 
-    assert (tmp_path / "book" / "2.md").read_text() == (
+    assert (tmp_path / "book" / "0002.md").read_text() == (
         "Figure caption\n\n"
         "<table><tr><td>first<br/>second</td></tr></table>\n\n"
-        "![Figure](img/2_1_2_9_8.jpg)\n"
+        "![Figure](img/0002_1_2_9_8.jpg)\n"
     )
-    with Image.open(tmp_path / "book" / "img" / "2_1_2_9_8.jpg") as image:
+    with Image.open(tmp_path / "book" / "img" / "0002_1_2_9_8.jpg") as image:
         assert image.size == (8, 6)
 
 
@@ -60,4 +60,24 @@ def test_export_strips_latex_underline_markup(tmp_path: Path) -> None:
         False,
     )
 
-    assert (tmp_path / "book" / "2.md").read_text() == "Before underlined content after.\n"
+    assert (
+        tmp_path / "book" / "0002.md"
+    ).read_text() == "Before underlined content after.\n"
+
+
+def test_exported_page_names_sort_in_numeric_order(tmp_path: Path) -> None:
+    source_image = tmp_path / "source.jpg"
+    Image.new("RGB", (20, 10), "white").save(source_image)
+    destination = tmp_path / "book"
+    exporter = MarkdownPageExporter()
+
+    for number in (10, 2, 1):
+        page = SourcePage(PageNumber(number), source_image)
+        exporter.export(PageMarkdown(page, str(number)), destination, False)
+
+    assert [path.name for path in sorted(destination.glob("*.md"))] == [
+        "0001.md",
+        "0002.md",
+        "0010.md",
+    ]
+    assert exporter.is_exported(PageNumber(2), destination)

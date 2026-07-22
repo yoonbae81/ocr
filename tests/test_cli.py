@@ -1,24 +1,25 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Self
 
 import pytest
 from typer.testing import CliRunner
 
 import cli
-from command_runtime import RecognizerFactory, RunOptions
+from command_runtime import RunOptions
 from domain import PageNumber
 
 
 runner = CliRunner()
+INVALID_USAGE_EXIT_CODE = 2
 
 
 @pytest.mark.parametrize("pages", ["0", "-1", "abc", "1-", "3-1"])
 def test_run_rejects_invalid_pages(
     pages: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    invalid_usage_exit_code = 2
     source = tmp_path / "book.pdf"
     source.touch()
     calls: list[Path] = []
@@ -31,7 +32,7 @@ def test_run_rejects_invalid_pages(
 
     result = runner.invoke(cli.app, [str(source), pages])
 
-    assert result.exit_code == invalid_usage_exit_code
+    assert result.exit_code == INVALID_USAGE_EXIT_CODE
     assert calls == []
 
 
@@ -64,38 +65,37 @@ def test_run_processes_quoted_wildcard_in_order_with_pages_preserved(
     (tmp_path / "b.pdf").touch()
     (tmp_path / "a.pdf").touch()
     monkeypatch.chdir(tmp_path)
-    calls: list[tuple[str, tuple[PageNumber, ...]]] = []
+    calls: list[tuple[str, tuple[PageNumber, ...] | None]] = []
     recognizers: list[object] = []
 
-    class FakeServer:
-        starts = 0
-
-        def __init__(self, model: str) -> None:
-            del model
-            self.url = "http://127.0.0.1:1234"
-
-        def __enter__(self) -> Self:
-            FakeServer.starts += 1
-            return self
-
-        def __exit__(self, *_: object) -> None:
-            return None
-
     class FakeRecognizer:
-        def __init__(self, *_: object, **__: object) -> None:
-            return None
+        pass
+
+    class FakeBackend:
+        cache_namespace = "fake"
+
+        def __init__(self) -> None:
+            self.recognizer = FakeRecognizer()
+
+        def get_recognizer(self) -> FakeRecognizer:
+            return self.recognizer
+
+    backend = FakeBackend()
+
+    @contextmanager
+    def fake_open_backend(*_: object) -> Iterator[FakeBackend]:
+        yield backend
 
     def fake_run_source(
         source: Path,
         options: RunOptions,
-        recognizer: RecognizerFactory,
+        recognition_backend: FakeBackend,
     ) -> int:
         calls.append((source.name, options.pages))
-        recognizers.append(recognizer())
+        recognizers.append(recognition_backend.get_recognizer())
         return 1
 
-    monkeypatch.setattr(cli, "MlxServerAdapter", FakeServer)
-    monkeypatch.setattr(cli, "PaddleOcrVlAdapter", FakeRecognizer)
+    monkeypatch.setattr(cli, "open_backend", fake_open_backend)
     monkeypatch.setattr(cli, "run_source", fake_run_source)
 
     result = runner.invoke(cli.app, ["*.pdf", "2-3"])
@@ -105,7 +105,6 @@ def test_run_processes_quoted_wildcard_in_order_with_pages_preserved(
         ("a.pdf", (PageNumber(2), PageNumber(3))),
         ("b.pdf", (PageNumber(2), PageNumber(3))),
     ]
-    assert FakeServer.starts == 1
     assert recognizers[0] is recognizers[1]
 
 
@@ -149,3 +148,35 @@ def test_absolute_wildcard_is_supported(
 
     assert result.exit_code == 0
     assert calls == [source.resolve()]
+
+
+def test_openvino_backend_requires_model_path(tmp_path: Path) -> None:
+    source = tmp_path / "book.pdf"
+    source.touch()
+
+    result = runner.invoke(cli.app, [str(source), "1", "--backend", "openvino"])
+
+    assert result.exit_code == INVALID_USAGE_EXIT_CODE
+    assert "--vlm-model-path is required" in result.output
+
+
+def test_openvino_backend_rejects_mlx_server_options(tmp_path: Path) -> None:
+    source = tmp_path / "book.pdf"
+    source.touch()
+
+    result = runner.invoke(
+        cli.app,
+        [
+            str(source),
+            "1",
+            "--backend",
+            "openvino",
+            "--vlm-model-path",
+            str(tmp_path / "model"),
+            "--server-url",
+            "http://127.0.0.1:9010",
+        ],
+    )
+
+    assert result.exit_code == INVALID_USAGE_EXIT_CODE
+    assert "only valid for MLX" in result.output

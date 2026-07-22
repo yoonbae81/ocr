@@ -1,16 +1,86 @@
 # Local OCR
 
-## 설치 / 사용법
+## 설치
 
-요구사항: Apple Silicon macOS, `uv`
+요구사항: Python 3.13 이상, `uv`
+
+MLX와 OpenVINO는 Transformers 버전 요구사항이 충돌하므로 동일 환경에 함께
+설치하지 않고 하드웨어에 맞는 프로필 하나를 선택합니다.
+
+### Apple Silicon MLX
 
 ```zsh
 git clone <repository-url> ocr
 cd ocr
-make install
+make install-mlx
 ```
 
-`make install`은 `uv sync --all-groups`로 의존성을 맞추고, 프로젝트를 editable 모드로 등록한 뒤 현재 셸에서 `ocr` 실행 경로를 등록합니다.
+### Windows + Intel iGPU(OpenVINO)
+
+Windows 기본 환경에는 `make`가 없을 수 있으므로 아래 PowerShell 명령으로
+직접 설치하는 방법을 권장합니다.
+
+1. `uv`가 없다면 설치하고 PowerShell을 다시 엽니다.
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+WinGet 등 다른 설치 방법은 [uv 공식 설치 문서](https://docs.astral.sh/uv/getting-started/installation/)를 참고합니다.
+
+2. 저장소를 내려받고 모델 경로를 지정합니다.
+
+```powershell
+git clone <repository-url> ocr
+cd ocr
+$env:OCR_VLM_MODEL_PATH="C:\models\PaddleOCR-VL-1.6-OpenVINO-INT4"
+$env:OCR_LAYOUT_MODEL_PATH="C:\models\DocLayoutV3.xml"
+```
+
+`OCR_VLM_MODEL_PATH`는 필수이고 `OCR_LAYOUT_MODEL_PATH`는 선택입니다.
+
+3. OpenVINO 환경과 실행 명령을 설치합니다.
+
+```powershell
+uv sync --all-groups --extra openvino
+uv run python -m install_config --backend openvino
+uv tool install --editable ".[openvino]" --force
+uv tool update-shell
+```
+
+4. PowerShell을 새로 열고 전역 실행 여부를 확인합니다.
+
+```powershell
+Get-Command ocr
+ocr --help
+ocr C:\docs\book.pdf 1-3
+```
+
+설치가 완료되면 작업 디렉터리와 관계없이 `ocr`만 입력해 실행할 수 있습니다.
+GNU Make가 설치된 환경에서는 2번까지 수행한 뒤 다음 단축 명령을 사용해도
+동일하게 설치됩니다.
+
+```powershell
+make install-openvino
+```
+
+`make install`은 이전과 같이 MLX 프로필을 설치합니다. 각 설치 방법은 선택한
+백엔드 의존성을 맞추고 프로젝트를 editable 모드로 등록한 뒤 실행 기본값을
+사용자 설정 `.env`에 저장합니다. OpenVINO 설치 시 `OCR_VLM_MODEL_PATH`는
+필수이고 `OCR_LAYOUT_MODEL_PATH`는 선택입니다.
+
+설치 설정 위치:
+
+- Windows: `%APPDATA%\ocr\.env`
+- Linux/macOS: `~/.config/ocr/.env` (`XDG_CONFIG_HOME` 지원)
+
+실행 시 우선순위는 CLI 옵션, 프로세스 환경변수, 현재 디렉터리 `.env`, 설치
+설정 `.env`, 내장 기본값 순서입니다.
+
+설치 명령은 현재 디렉터리 `.env`도 읽으므로 환경변수를 직접 지정하는 대신
+`.env.example`을 `.env`로 복사해 모델 경로를 수정한 뒤 실행할 수도 있습니다.
+
+## 사용법
 
 설치 후:
 
@@ -33,18 +103,18 @@ uv run ocr /path/to/book.pdf 1-3
 
 - 입력: PDF/이미지/ZIP
 - 출력: 현재는 **Markdown**만 지원
-- 출력 대상 폴더: 실행 디렉터리에 입력 파일명과 동일한 폴더를 만들고 페이지별로 `1.md`, `2.md` ... 저장
+- 출력 대상 폴더: 실행 디렉터리에 입력 파일명과 동일한 폴더를 만들고 페이지별로 `0001.md`, `0002.md` ... 저장
 - 이미지: `img/` 하위에 본문에서 추출된 이미지 영역만 저장
-  - 파일명 규칙: `<page>_<start_x>_<start_y>_<end_x>_<end_y>.jpg`
+  - 파일명 규칙: `<page:04d>_<start_x>_<start_y>_<end_x>_<end_y>.jpg`
 
 예시:
 
 ```text
 ./book/
-├── 1.md
-├── 2.md
+├── 0001.md
+├── 0002.md
 └── img/
-    └── 2_369_1899_1903_2660.jpg
+    └── 0002_369_1899_1903_2660.jpg
 ```
 
 `ocr`는 페이지 번호가 1부터 시작하는 “물리 페이지” 기준으로 인식합니다.
@@ -74,20 +144,34 @@ ocr /path/to/book.pdf 1-3 --server-url http://127.0.0.1:9010 --vl-concurrency 4
 ocr /path/to/book.pdf 1-3 --profile
 ```
 
+```powershell
+# Intel Arc iGPU + OpenVINO
+ocr C:\docs\book.pdf 1-3 `
+  --backend openvino `
+  --vlm-model-path C:\models\PaddleOCR-VL-1.6-OpenVINO-INT4 `
+  --layout-model-path C:\models\DocLayoutV3.xml
+```
+
 명령 형식: `ocr <파일/패턴> <페이지>`
 
 옵션 요약:
 
-- `pages`(필수 위치 인자): `1,5-8` 형식 지정
+- `pages`(선택 위치 인자): 생략 시 전체 페이지, 지정 시 `1,5-8` 형식
 - `--dpi`: PDF 렌더링 해상도 (기본값 300)
 - `--zip-prefix`: ZIP 내부 파일명 충돌 방지용 프리픽스
 - `--replace`: 기존 페이지 덮어쓰기
 - `--resume`: 이미 존재하는 페이지 스킵
 - `--batch-size`: Paddle 페이지 배치 크기(기본 4)
+- `--backend`: `mlx` 또는 `openvino` 선택(기본 `mlx`)
 - `--cache/--no-cache`: OCR 원문 캐시 사용 여부(기본 사용)
 - `--cache-dir`: 캐시 경로 지정
-- `--server-url`: 이미 실행 중인 MLX 서버에 연결
-- `--vl-concurrency`: VL 요청 동시성 상한
+- `--server-url`, `--vl-concurrency`: MLX 전용 서버 설정
+- `--vlm-model-path`, `--layout-model-path`: OpenVINO 모델 경로
+- `--vlm-device`, `--layout-device`: OpenVINO 장치(권장 `GPU`/`CPU`)
+- `--vlm-batch-size`: OpenVINO 레이아웃 블록 배치 크기(기본 32)
+- `--max-new-tokens`: OpenVINO 블록당 생성 토큰 상한(기본 64)
+- `--llm-int4-compress`, `--vision-int8-quant`: 양자화 모델 선택
+- `--gpu-kv-cache-precision`: Intel GPU KV-cache 정밀도(기본 `f16`)
 - `--profile`: 준비/캐시/인식/전체 시간 출력
 
 ## 아키텍처(헥사고날)
@@ -96,7 +180,11 @@ ocr /path/to/book.pdf 1-3 --profile
 
 - `cli.py`: `typer` CLI 진입점
 - `application.py`: 페이지 선택·캐시 사용·인식 결과 기록 플로우
-- `adapters/recognition/paddle.py`: PaddleOCR-VL 호출 어댑터
+- `ports/recognition.py`: 인식기와 백엔드 지연 생성 포트
+- `adapters/recognition/mlx.py`: MLX-VLM PaddleOCR-VL 어댑터
+- `adapters/recognition/openvino.py`: 인프로세스 OpenVINO 어댑터
+- `adapters/recognition/backend.py`: 백엔드 수명주기와 캐시 식별자
+- `bootstrap.py`: CLI 설정을 구체 어댑터로 연결하는 조립 계층
 - `mlx_server.py`: 로컬 MLX 서버 생명주기 관리
 - `ports/source.py`: 입력 소스 포트(계약)
 - `adapters/source/{image.py,pdf.py,zip.py}`: PDF/JPG/PNG/WEBP/ZIP 입력 구현

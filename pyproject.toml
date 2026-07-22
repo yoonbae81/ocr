@@ -1,17 +1,26 @@
 [project]
 name = "ocr"
 version = "0.2.0"
-description = "Local PaddleOCR-VL document OCR backed by an MLX-VLM server."
+description = "Local PaddleOCR-VL document OCR with pluggable MLX and OpenVINO backends."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "mlx-vlm>=0.6.5",
+    "pillow>=11.0",
+    "pymupdf>=1.26",
+    "python-dotenv>=1.1",
+    "typer>=0.16",
+]
+
+[project.optional-dependencies]
+mlx = [
+    "mlx-vlm>=0.6.5; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "paddleocr[doc-parser]>=3.7.0",
     "paddlex[ocr,genai-client]>=3.7.0",
     "paddlepaddle>=3.3.1",
-    "pillow>=11.0",
-    "pymupdf>=1.26",
-    "typer>=0.16",
+]
+openvino = [
+    "openvino==2026.2.1",
+    "paddleocr-vl-openvino @ git+https://github.com/sublatesublate-design/paddleocr-vl-1-6-openvino-local.git@d5e6b22dbfdff881849d19789bcc766258812aa6",
 ]
 
 [project.scripts]
@@ -25,10 +34,14 @@ build-backend = "setuptools.build_meta"
 package-dir = {"" = "src"}
 py-modules = [
     "application",
+    "backend_config",
+    "bootstrap",
     "cli",
     "command_runtime",
     "domain",
+    "install_config",
     "mlx_server",
+    "settings",
     ]
 
 [tool.setuptools.packages.find]
@@ -40,6 +53,14 @@ include = ["adapters*", "ports*"]
 
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff>=0.12", "basedpyright>=1.28"]
+
+[tool.uv]
+conflicts = [
+    [
+        { extra = "mlx" },
+        { extra = "openvino" },
+    ],
+]
 
 [tool.ruff]
 target-version = "py313"

@@ -76,5 +76,5 @@ def test_normalize_markdown_opens_source_once_for_multiple_crops(
 
     assert opened == 1
     assert normalized == (
-        "![First](img/2_1_2_9_8.jpg)![Second](img/2_2_1_8_7.jpg)"
+        "![First](img/0002_1_2_9_8.jpg)![Second](img/0002_2_1_8_7.jpg)"
     )

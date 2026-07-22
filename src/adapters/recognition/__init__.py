@@ -1,5 +1,6 @@
 """Recognition adapters backed by OCR engines."""
 
-from .paddle import PaddleOcrVlAdapter
+from .mlx import MlxPaddleRecognizerAdapter
+from .openvino import OpenVinoPaddleRecognizerAdapter
 
-__all__ = ["PaddleOcrVlAdapter"]
+__all__ = ["MlxPaddleRecognizerAdapter", "OpenVinoPaddleRecognizerAdapter"]

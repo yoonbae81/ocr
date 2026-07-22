@@ -2,23 +2,28 @@
 
 from __future__ import annotations
 
-from contextlib import ExitStack
-from pathlib import Path
 import logging
-import typer
+from pathlib import Path
 import warnings
 from time import perf_counter
 from typing import Annotated
 
-from command_runtime import MODEL, RunOptions, run_source
+import typer
+
+from backend_config import (
+    BackendKind,
+    MlxBackendConfig,
+    OpenVinoBackendConfig,
+)
+from bootstrap import BackendConfig, open_backend
+from command_runtime import RunOptions, run_source
 from domain import PageNumber
-from mlx_server import MlxServerAdapter
-from adapters.recognition import PaddleOcrVlAdapter
-from ports import PageRecognizer
+from settings import load_settings
 
 
 MAX_SELECTED_PAGES = 10_000
 app = typer.Typer(no_args_is_help=True, add_completion=False)
+_SETTINGS = load_settings()
 
 
 def _normalize_library_output() -> None:
@@ -126,6 +131,58 @@ def _resolve_sources(source: str) -> tuple[Path, ...]:
     return (resolved,)
 
 
+def _backend_config(
+    backend: BackendKind,
+    model: str,
+    server_url: str | None,
+    vl_concurrency: int | None,
+    vlm_model_path: Path | None,
+    layout_model_path: Path | None,
+    vlm_device: str,
+    layout_device: str,
+    llm_int4_compress: bool,
+    vision_int8_quant: bool,
+    vlm_batch_size: int,
+    max_new_tokens: int,
+    gpu_kv_cache_precision: str,
+    model_cache_dir: Path | None,
+) -> BackendConfig:
+    if backend is BackendKind.MLX:
+        if vlm_model_path is not None or layout_model_path is not None:
+            raise typer.BadParameter(
+                "OpenVINO model paths cannot be used with the MLX backend."
+            )
+        return MlxBackendConfig(model, server_url, vl_concurrency)
+    if server_url is not None or vl_concurrency is not None:
+        raise typer.BadParameter(
+            "--server-url and --vl-concurrency are only valid for MLX."
+        )
+    if vlm_model_path is None:
+        raise typer.BadParameter(
+            "--vlm-model-path is required for the OpenVINO backend."
+        )
+    return OpenVinoBackendConfig(
+        vlm_model_path=vlm_model_path.expanduser().resolve(),
+        layout_model_path=(
+            None
+            if layout_model_path is None
+            else layout_model_path.expanduser().resolve()
+        ),
+        vlm_device=vlm_device,
+        layout_device=layout_device,
+        llm_int4_compress=llm_int4_compress,
+        vision_int8_quant=vision_int8_quant,
+        vlm_batch_size=vlm_batch_size,
+        max_new_tokens=max_new_tokens,
+        gpu_kv_cache_precision=gpu_kv_cache_precision,
+        model_cache_dir=(
+            None
+            if model_cache_dir is None
+            else model_cache_dir.expanduser().resolve()
+        ),
+    )
+
+
 @app.command()
 def run(
     source: Annotated[
@@ -151,17 +208,86 @@ def run(
         bool, typer.Option("--cache/--no-cache", help="Reuse raw OCR results.")
     ] = True,
     cache_dir: Annotated[Path | None, typer.Option(help="Raw OCR cache directory.")] = None,
+    backend: Annotated[
+        BackendKind,
+        typer.Option(help="Recognition backend: mlx or openvino."),
+    ] = _SETTINGS.backend,
+    model: Annotated[
+        str,
+        typer.Option(help="MLX-VLM model name."),
+    ] = _SETTINGS.model,
     server_url: Annotated[
         str | None, typer.Option(help="Reuse an already-running MLX-VLM server.")
-    ] = None,
+    ] = _SETTINGS.server_url,
     vl_concurrency: Annotated[
         int | None, typer.Option(min=1, help="Maximum concurrent VL requests.")
-    ] = None,
+    ] = _SETTINGS.vl_concurrency,
+    vlm_model_path: Annotated[
+        Path | None,
+        typer.Option(help="OpenVINO PaddleOCR-VL model directory."),
+    ] = _SETTINGS.vlm_model_path,
+    layout_model_path: Annotated[
+        Path | None,
+        typer.Option(help="Optional OpenVINO DocLayout model XML path."),
+    ] = _SETTINGS.layout_model_path,
+    vlm_device: Annotated[
+        str, typer.Option(help="OpenVINO VLM device (GPU, CPU, or AUTO).")
+    ] = _SETTINGS.vlm_device,
+    layout_device: Annotated[
+        str, typer.Option(help="OpenVINO layout device (CPU, GPU, NPU, or AUTO).")
+    ] = _SETTINGS.layout_device,
+    llm_int4_compress: Annotated[
+        bool,
+        typer.Option(
+            "--llm-int4-compress/--no-llm-int4-compress",
+            help="Select the OpenVINO INT4 LLM artifacts.",
+        ),
+    ] = _SETTINGS.llm_int4_compress,
+    vision_int8_quant: Annotated[
+        bool,
+        typer.Option(
+            "--vision-int8-quant/--no-vision-int8-quant",
+            help="Select the OpenVINO INT8 vision artifacts.",
+        ),
+    ] = _SETTINGS.vision_int8_quant,
+    vlm_batch_size: Annotated[
+        int,
+        typer.Option(min=1, help="OpenVINO VLM layout-block batch size."),
+    ] = _SETTINGS.vlm_batch_size,
+    max_new_tokens: Annotated[
+        int,
+        typer.Option(min=1, help="Maximum generated tokens per OpenVINO block."),
+    ] = _SETTINGS.max_new_tokens,
+    gpu_kv_cache_precision: Annotated[
+        str,
+        typer.Option(help="OpenVINO GPU KV-cache precision."),
+    ] = _SETTINGS.gpu_kv_cache_precision,
+    model_cache_dir: Annotated[
+        Path | None,
+        typer.Option(help="Model download cache used by the OpenVINO pipeline."),
+    ] = _SETTINGS.model_cache_dir,
     profile: Annotated[bool, typer.Option(help="Print phase-level elapsed times.")] = False,
 ) -> None:
+    """Recognize selected pages from one or more local document sources."""
     resolved_sources = _resolve_sources(source)
     _normalize_library_output()
     selected_pages = _parse_pages(pages)
+    recognition_config = _backend_config(
+        backend,
+        model,
+        server_url,
+        vl_concurrency,
+        vlm_model_path,
+        layout_model_path,
+        vlm_device,
+        layout_device,
+        llm_int4_compress,
+        vision_int8_quant,
+        vlm_batch_size,
+        max_new_tokens,
+        gpu_kv_cache_precision,
+        model_cache_dir,
+    )
     typer.echo(
         f"Starting OCR for {len(resolved_sources)} source(s) and "
         f"{_format_selected_pages(selected_pages)}."
@@ -179,33 +305,12 @@ def run(
     )
     total_exported = 0
     failures: list[tuple[Path, Exception]] = []
-    with ExitStack() as resources:
-        shared_recognizer: PageRecognizer | None = None
-
-        def get_recognizer() -> PageRecognizer:
-            nonlocal shared_recognizer
-            if shared_recognizer is None:
-                url = server_url
-                if url is None:
-                    typer.echo(f"Starting local MLX-VLM server for model: {MODEL}")
-                    url = resources.enter_context(MlxServerAdapter(MODEL)).url
-                    typer.echo(f"MLX-VLM server ready: {url}")
-                else:
-                    typer.echo(f"Using external MLX-VLM server: {url}")
-                typer.echo("Initializing OCR recognizer...")
-                shared_recognizer = PaddleOcrVlAdapter(
-                    url,
-                    MODEL,
-                    max_concurrency=vl_concurrency,
-                )
-                typer.echo("OCR recognizer ready.")
-            return shared_recognizer
-
+    with open_backend(recognition_config, typer.echo) as recognition_backend:
         for index, resolved in enumerate(resolved_sources, start=1):
             typer.echo(f"[{index}/{len(resolved_sources)}] Source: {resolved.name}")
             started = perf_counter()
             try:
-                exported_pages = run_source(resolved, options, get_recognizer)
+                exported_pages = run_source(resolved, options, recognition_backend)
                 total_exported += exported_pages
                 elapsed = perf_counter() - started
                 typer.echo(

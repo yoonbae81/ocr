@@ -1,18 +1,5 @@
-"""Input and recognition ports for the OCR application."""
+"""Application ports."""
 
-from __future__ import annotations
+from .recognition import PageRecognizer, RecognitionBackend
 
-from collections.abc import Iterator
-from typing import Protocol
-
-from domain import PageMarkdown, SourcePage
-
-
-class PageRecognizer(Protocol):
-    """Recognizes rendered pages through the document pipeline."""
-
-    def recognize_many(
-        self, pages: tuple[SourcePage, ...]
-    ) -> Iterator[PageMarkdown]:
-        """Recognize a bounded page batch in input order."""
-        ...
+__all__ = ["PageRecognizer", "RecognitionBackend"]

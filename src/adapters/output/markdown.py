@@ -1,3 +1,5 @@
+"""Markdown export and normalization adapter."""
+
 from __future__ import annotations
 
 import re
@@ -25,6 +27,7 @@ _CROP_SOURCE_PATTERN: Final = re.compile(
 _RULES_DIR: Final = Path(__file__).with_name("rules") / "markdown"
 _RULE_PATHS: Final = tuple(sorted(_RULES_DIR.glob("*.txt")))
 _RULE_LINE_PARTS: Final = 2
+_PAGE_FILENAME_WIDTH: Final = 4
 
 
 def _load_regex_rules(path: Path) -> tuple[tuple[re.Pattern[str], str], ...]:
@@ -45,7 +48,12 @@ _REGEX_RULES: Final = tuple(
 )
 
 
+def _markdown_filename(page: PageNumber) -> str:
+    return f"{page.value:0{_PAGE_FILENAME_WIDTH}d}.md"
+
+
 def normalize_markdown(result: PageMarkdown, image_directory: Path) -> str:
+    """Normalize recognized Markdown and persist referenced image crops."""
     normalized = _normalize_table_breaks(result.text)
     normalized = _normalize_images(normalized, result.page, image_directory)
     return _apply_regex_rules(normalized, _REGEX_RULES)
@@ -100,7 +108,8 @@ def _replace_image(
     start_y = int(coordinates.group("start_y"))
     end_x = int(coordinates.group("end_x"))
     end_y = int(coordinates.group("end_y"))
-    image_name = f"{page.number.value}_{start_x}_{start_y}_{end_x}_{end_y}.jpg"
+    page_prefix = f"{page.number.value:0{_PAGE_FILENAME_WIDTH}d}"
+    image_name = f"{page_prefix}_{start_x}_{start_y}_{end_x}_{end_y}.jpg"
     source_image.crop((start_x, start_y, end_x, end_y)).convert("RGB").save(
         image_directory / image_name, "JPEG", quality=95
     )
@@ -108,12 +117,15 @@ def _replace_image(
 
 
 class MarkdownPageExporter:
+    """Export one recognized page to the destination Markdown tree."""
 
     def is_exported(self, page: PageNumber, destination: Path) -> bool:
-        return (destination / f"{page.value}.md").exists()
+        """Return whether the destination already contains this page."""
+        return (destination / _markdown_filename(page)).exists()
 
     def export(self, result: PageMarkdown, destination: Path, replace: bool) -> None:
-        markdown_path = destination / f"{result.page.number.value}.md"
+        """Normalize and atomically export one recognized page."""
+        markdown_path = destination / _markdown_filename(result.page.number)
         if markdown_path.exists() and not replace:
             raise FileExistsError(f"Output exists; pass --replace: {markdown_path}")
         destination.mkdir(parents=True, exist_ok=True)

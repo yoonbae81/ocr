@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import batched
 from pathlib import Path
@@ -19,11 +18,8 @@ from application import (
 )
 from domain import PageNumber, SourcePage
 from adapters.source import ImageSourceAdapter, PdfSourceAdapter, ZipSourceAdapter
-from ports import PageRecognizer
+from ports import RecognitionBackend
 from ports.source import PageSource
-
-
-MODEL = "matrixmaven/PaddleOCR-VL-1.6-MLX"
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,9 +35,6 @@ class RunOptions:
     use_cache: bool
     cache_dir: Path | None
     profile: bool
-
-
-RecognizerFactory = Callable[[], PageRecognizer]
 
 
 def _source_adapter(
@@ -71,7 +64,7 @@ def _page_range_label(pages: tuple[int, ...]) -> str:
 def run_source(
     source: Path,
     options: RunOptions,
-    recognizer: RecognizerFactory,
+    backend: RecognitionBackend,
 ) -> int:
     """Process one source while reusing the command-owned recognizer."""
     destination = Path.cwd() / source.stem
@@ -93,9 +86,10 @@ def run_source(
         exporter = MarkdownPageExporter()
         if options.use_cache:
             cache_root = options.cache_dir or Path.home() / ".cache" / "ocr" / "raw"
-            cache = FilesystemRecognitionCache(cache_root, MODEL)
+            cache = FilesystemRecognitionCache(cache_root, backend.cache_namespace)
             typer.echo(
-                f"[{source.name}] Cache enabled: {cache_root / MODEL}"
+                f"[{source.name}] Cache enabled: {cache_root} "
+                f"({backend.cache_namespace})"
             )
         else:
             cache = DisabledRecognitionCache()
@@ -130,20 +124,24 @@ def run_source(
 
             for page_batch in batched(page_results, options.batch_size, strict=False):
                 batch_started = perf_counter()
-                results = tuple(recognizer().recognize_many(page_batch))
+                results = tuple(backend.get_recognizer().recognize_many(page_batch))
                 batch_elapsed = perf_counter() - batch_started
                 if not results:
                     continue
-                page_numbers = tuple(result.page.number.value for result in results)
+                recognized_page_numbers = tuple(
+                    result.page.number.value for result in results
+                )
                 recognition_seconds += batch_elapsed
                 for result in results:
                     cache.store(result)
                     exporter.export(result, destination, options.replace)
                     recognized += 1
                 typer.echo(
-                    f"[{source.name}] Recognized {_page_range_label(page_numbers)} "
-                    f"({len(page_numbers)} page(s)) in {batch_elapsed:.3f}s, "
-                    f"avg {batch_elapsed / len(page_numbers):.3f}s/page"
+                    f"[{source.name}] Recognized "
+                    f"{_page_range_label(recognized_page_numbers)} "
+                    f"({len(recognized_page_numbers)} page(s)) in "
+                    f"{batch_elapsed:.3f}s, avg "
+                    f"{batch_elapsed / len(recognized_page_numbers):.3f}s/page"
                 )
         exported = cached + recognized
     total_seconds = perf_counter() - started
