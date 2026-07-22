@@ -64,6 +64,77 @@ GNU Make가 설치된 환경에서는 2번까지 수행한 뒤 다음 단축 명
 make install-openvino
 ```
 
+#### Windows + Intel Arc 실전 설치 메모
+
+아래 내용은 Windows 11, Intel Arc Graphics, Python 3.14, OpenVINO 2026.2.1에서
+실제 PDF OCR 실행까지 확인한 절차입니다.
+
+- `uv`를 Python 패키지로 설치했지만 PATH에서 찾지 못하는 경우에는
+  `uv` 대신 `python -m uv`를 사용할 수 있습니다.
+- OpenVINO 의존성 설치 후 `ov.Core().available_devices`에 `GPU`가 표시되는지
+  먼저 확인하면 드라이버와 런타임 문제를 OCR 전에 분리할 수 있습니다.
+
+```powershell
+python -m pip install --user uv
+python -m uv sync --all-groups --extra openvino
+python -m uv run python -c "import openvino as ov; print(ov.Core().available_devices)"
+```
+
+PaddleOCR-VL 1.6 INT4/INT8 모델은
+[Hugging Face 모델 저장소](https://huggingface.co/sublatesublate-design/PaddleOCR-VL-1.6-OpenVINO-INT4)에서
+필요한 최적화 파일만 받을 수 있습니다. 아래 예시는 약 1GB 분량의 INT4 LLM,
+INT8 vision 모델과 tokenizer/config 파일만 사용자 캐시에 저장합니다.
+
+```powershell
+$modelRoot = Join-Path $env:USERPROFILE ".cache\ocr\models\PaddleOCR-VL-1.6-OpenVINO-INT4"
+python -m uv run python -c "from huggingface_hub import snapshot_download; snapshot_download('sublatesublate-design/PaddleOCR-VL-1.6-OpenVINO-INT4', local_dir=r'$modelRoot', allow_patterns=['*.json','*.jinja','tokenizer.model','configuration_paddleocr_vl.py','llm_embd.*','llm_stateful_int4.*','vision_int8.*','vision_mlp.*'])"
+```
+
+현재 OpenVINO 어댑터의 모델 사전검사는 양자화 파일을 선택하더라도
+`vision.xml`과 `llm_stateful.xml`의 존재를 확인합니다. 최적화 파일만 받은 경우
+두 XML에 호환 별칭을 만들지 않으면 ModelScope의 PaddleOCR-VL 1.5 전체 모델을
+자동으로 다시 다운로드할 수 있습니다. XML 내부의 weight 파일 참조는 유지되므로
+다음처럼 XML만 복사합니다.
+
+```powershell
+Copy-Item (Join-Path $modelRoot "vision_int8.xml") (Join-Path $modelRoot "vision.xml")
+Copy-Item (Join-Path $modelRoot "llm_stateful_int4.xml") (Join-Path $modelRoot "llm_stateful.xml")
+```
+
+레이아웃 모델은 `DocLayoutV3.xml`과 같은 위치의 `DocLayoutV3.bin`이 모두
+필요합니다. 다음은 어댑터가 사용하는 ModelScope 모델에서 두 파일만 받는
+PowerShell 예시입니다.
+
+```powershell
+$layoutRoot = Join-Path $env:USERPROFILE ".cache\ocr\models\PP-DoclayoutV3-ov"
+New-Item -ItemType Directory -Force $layoutRoot | Out-Null
+$layoutBase = "https://www.modelscope.cn/models/zhaohb/PaddleOCR-VL-1.5-ov/resolve/master/PP-DoclayoutV3-ov"
+Invoke-WebRequest "$layoutBase/DocLayoutV3.xml" -OutFile (Join-Path $layoutRoot "DocLayoutV3.xml")
+Invoke-WebRequest "$layoutBase/DocLayoutV3.bin" -OutFile (Join-Path $layoutRoot "DocLayoutV3.bin")
+```
+
+모델을 준비한 뒤 설치 기본값을 저장합니다.
+
+```powershell
+$env:OCR_VLM_MODEL_PATH = $modelRoot
+$env:OCR_LAYOUT_MODEL_PATH = Join-Path $layoutRoot "DocLayoutV3.xml"
+python -m uv run python -m install_config --backend openvino
+```
+
+한국어 Windows의 기본 CP949 콘솔에서는 의존 라이브러리가 출력하는 이모지 때문에
+`UnicodeEncodeError`가 발생할 수 있습니다. 그런 경우 실행 프로세스에 UTF-8 모드를
+지정합니다.
+
+```powershell
+$env:PYTHONUTF8 = "1"
+python -m uv run ocr "C:\docs\book.pdf" 1-7 --replace --profile
+```
+
+첫 실행은 모델 다운로드와 OpenVINO GPU 컴파일 때문에 수 분 걸릴 수 있습니다.
+진행 로그가 잠시 없어도 Python 프로세스의 CPU/메모리 사용량이 계속 변하면 초기화가
+진행 중일 가능성이 큽니다. 이후 실행에서는 모델 캐시를 재사용합니다. 모델 구성을
+바꾼 직후 이전 OCR 결과 캐시와 섞이지 않게 검증하려면 한 번 `--no-cache`를 사용합니다.
+
 `make install`은 이전과 같이 MLX 프로필을 설치합니다. 각 설치 방법은 선택한
 백엔드 의존성을 맞추고 프로젝트를 editable 모드로 등록한 뒤 실행 기본값을
 사용자 설정 `.env`에 저장합니다. OpenVINO 설치 시 `OCR_VLM_MODEL_PATH`는
